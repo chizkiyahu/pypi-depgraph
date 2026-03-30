@@ -83,6 +83,20 @@
   font-size: clamp(2rem, 4vw, 3.1rem);
 }
 
+.title-with-link {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.desktop-title-link {
+  color: var(--ink-soft);
+}
+
+.desktop-title-link:hover {
+  color: var(--ink);
+}
+
 .landing-copy,
 .graph-stage-subtitle,
 .node-summary {
@@ -280,6 +294,21 @@
   color: var(--ink);
 }
 
+.social-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 160ms ease;
+  font-size: 0.95rem;
+}
+
+.social-link:hover {
+  color: var(--ink);
+}
+
 .menu-toggle {
   position: absolute;
   top: 20px;
@@ -374,6 +403,17 @@
   margin-top: 20px;
   padding-top: 18px;
   border-top: 1px solid var(--border);
+}
+
+.drawer-footer-links,
+.landing-footer {
+  display: flex;
+  margin-top: 12px;
+}
+
+.landing-footer {
+  justify-content: center;
+  margin-top: 8px;
 }
 
 .drawer-toggle {

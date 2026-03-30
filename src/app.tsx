@@ -233,6 +233,13 @@ export function App() {
                 <span>{error}</span>
               </div>
             ) : null}
+
+            <div class="landing-footer">
+              <a href="https://github.com/chizkiyahu/pypi_gragh" target="_blank" rel="noopener noreferrer" class="social-link">
+                <svg width="20" height="20" aria-hidden="true"><use href="/icons.svg#github-icon" /></svg>
+                View on GitHub
+              </a>
+            </div>
           </section>
         </main>
       </div>
@@ -472,6 +479,12 @@ export function App() {
               </button>
             ))}
           </div>
+          <div class="drawer-footer-links">
+            <a href="https://github.com/chizkiyahu/pypi_gragh" target="_blank" rel="noopener noreferrer" class="social-link">
+              <svg width="20" height="20" aria-hidden="true"><use href="/icons.svg#github-icon" /></svg>
+              GitHub Repository
+            </a>
+          </div>
         </div>
       </aside>
 
@@ -486,7 +499,12 @@ export function App() {
         <section class="panel graph-stage">
           <div class="graph-stage-header">
             <div class="graph-stage-title">
-              <p class="section-kicker">Dependency graph</p>
+              <div class="title-with-link">
+                <p class="section-kicker">Dependency graph</p>
+                <a href="https://github.com/chizkiyahu/pypi_gragh" target="_blank" rel="noopener noreferrer" class="social-link desktop-title-link" title="View source on GitHub">
+                  <svg width="20" height="20" aria-hidden="true"><use href="/icons.svg#github-icon" /></svg>
+                </a>
+              </div>
               <h2>{result.effectiveInputs.packageName} graph</h2>
               <p class="graph-stage-subtitle">
                 Click a node to inspect its constraints. Change graph direction and labels from the side menu.
