@@ -2,6 +2,9 @@ import cytoscape from 'cytoscape'
 import { useEffect, useRef } from 'preact/hooks'
 import type { GraphDirection, GraphEdge, GraphNode } from '../types.ts'
 
+const GRAPH_FONT_STACK =
+  'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+
 interface GraphCanvasProps {
   nodes: GraphNode[]
   edges: GraphEdge[]
@@ -45,7 +48,7 @@ function buildGraphStyles(isDark: boolean) {
         color: nodeInk,
         'font-size': '19px',
         'font-weight': 600,
-        'font-family': 'IBM Plex Sans, sans-serif',
+        'font-family': GRAPH_FONT_STACK,
         'text-wrap': 'wrap',
         'text-max-width': '206px',
         'text-valign': 'center',
@@ -204,7 +207,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
 
     applyGraphFocus(instance, props.selectedNodeId, props.showAllEdgeLabels)
 
-    instance.layout({
+    const layoutOptions: cytoscape.BreadthFirstLayoutOptions = {
       name: 'breadthfirst',
       // Newly loaded graphs briefly share the same origin point before the
       // breadthfirst positions are applied. Keeping the layout synchronous
@@ -229,7 +232,9 @@ export function GraphCanvas(props: GraphCanvasProps) {
         props.direction === 'left-right'
           ? rotateBreadthfirstPosition(position)
           : position,
-    }).run()
+    }
+
+    instance.layout(layoutOptions).run()
   }, [props.nodes, props.edges, props.rootId, props.direction])
 
   useEffect(() => {

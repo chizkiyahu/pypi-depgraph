@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import './app.css'
-import { GraphCanvas } from './components/GraphCanvas.tsx'
 import { createBrowserCacheStore } from './lib/cache.ts'
 import { formatPlatformOption } from './lib/platforms.ts'
-import { createPypiClient } from './lib/pypi.ts'
-import { resolveDependencyGraph } from './lib/resolver.ts'
 import { getDefaultInputs, readInputsFromUrl, writeInputsToUrl } from './lib/url-state.ts'
 import { normalizePackageName } from './lib/versions.ts'
 import type {
@@ -14,6 +11,10 @@ import type {
   ResolutionResult,
   RootOptions,
 } from './types.ts'
+
+type GraphCanvasComponent = typeof import('./components/GraphCanvas.tsx')['GraphCanvas']
+type PypiClient = ReturnType<typeof import('./lib/pypi.ts')['createPypiClient']>
+type ResolveDependencyGraph = typeof import('./lib/resolver.ts')['resolveDependencyGraph']
 
 const SAMPLE_PACKAGES = ['fastapi', 'httpx', 'apache-airflow', 'pydantic']
 
@@ -33,12 +34,14 @@ function SvgSprite() {
 
 export function App() {
   const cacheRef = useRef(createBrowserCacheStore())
-  const clientRef = useRef(createPypiClient({ cache: cacheRef.current }))
+  const clientRef = useRef<PypiClient | null>(null)
+  const resolveDependencyGraphRef = useRef<ResolveDependencyGraph | null>(null)
   const initialInputsRef = useRef(
     typeof window === 'undefined' ? getDefaultInputs() : readInputsFromUrl(),
   )
   const initialInputs = initialInputsRef.current
 
+  const [GraphCanvasComponent, setGraphCanvasComponent] = useState<GraphCanvasComponent | null>(null)
   const [inputs, setInputs] = useState<ResolutionInputs>(initialInputs)
   const [result, setResult] = useState<ResolutionResult | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
@@ -50,6 +53,7 @@ export function App() {
   const [graphDirection, setGraphDirection] = useState<GraphDirection>('top-bottom')
   const [showAllEdgeLabels, setShowAllEdgeLabels] = useState(false)
   const [cacheResetting, setCacheResetting] = useState(false)
+  const [graphCanvasLoadError, setGraphCanvasLoadError] = useState<string | null>(null)
   const latestRequestId = useRef(0)
   const syncingInputsRef = useRef(false)
 
@@ -65,6 +69,61 @@ export function App() {
     void runResolution(initialInputs)
   }, [])
 
+  useEffect(() => {
+    if ((status !== 'loading' && !result) || GraphCanvasComponent || graphCanvasLoadError) {
+      return
+    }
+
+    let cancelled = false
+
+    void import('./components/GraphCanvas.tsx')
+      .then((module) => {
+        if (cancelled) {
+          return
+        }
+
+        setGraphCanvasComponent(() => module.GraphCanvas)
+      })
+      .catch(() => {
+        if (cancelled) {
+          return
+        }
+
+        setGraphCanvasLoadError('The interactive graph renderer could not be loaded.')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [GraphCanvasComponent, graphCanvasLoadError, result, status])
+
+  async function ensureResolutionEngine() {
+    const [pypiModule, resolverModule] = await Promise.all([
+      import('./lib/pypi.ts'),
+      import('./lib/resolver.ts'),
+    ])
+
+    if (!clientRef.current) {
+      clientRef.current = pypiModule.createPypiClient({ cache: cacheRef.current })
+    }
+
+    if (!resolveDependencyGraphRef.current) {
+      resolveDependencyGraphRef.current = resolverModule.resolveDependencyGraph
+    }
+
+    const client = clientRef.current
+    const resolveDependencyGraph = resolveDependencyGraphRef.current
+
+    if (!client || !resolveDependencyGraph) {
+      throw new Error('The dependency resolver could not be initialized.')
+    }
+
+    return {
+      client,
+      resolveDependencyGraph,
+    }
+  }
+
   async function runResolution(nextInputs: ResolutionInputs) {
     const requestId = latestRequestId.current + 1
     latestRequestId.current = requestId
@@ -73,7 +132,8 @@ export function App() {
     setSelectedNodeId(null)
 
     try {
-      const nextResult = await resolveDependencyGraph(nextInputs, clientRef.current)
+      const { client, resolveDependencyGraph } = await ensureResolutionEngine()
+      const nextResult = await resolveDependencyGraph(nextInputs, client)
       if (latestRequestId.current !== requestId) {
         return
       }
@@ -535,15 +595,19 @@ export function App() {
           </div>
 
           <div class="graph-frame">
-            <GraphCanvas
-              nodes={result.nodes}
-              edges={result.edges}
-              rootId={result.rootId}
-              selectedNodeId={selectedNodeId}
-              direction={graphDirection}
-              showAllEdgeLabels={showAllEdgeLabels}
-              onSelectNode={setSelectedNodeId}
-            />
+            {GraphCanvasComponent ? (
+              <GraphCanvasComponent
+                nodes={result.nodes}
+                edges={result.edges}
+                rootId={result.rootId}
+                selectedNodeId={selectedNodeId}
+                direction={graphDirection}
+                showAllEdgeLabels={showAllEdgeLabels}
+                onSelectNode={setSelectedNodeId}
+              />
+            ) : (
+              <div class="graph-empty">{graphCanvasLoadError ?? 'Loading interactive graph…'}</div>
+            )}
           </div>
         </section>
 
