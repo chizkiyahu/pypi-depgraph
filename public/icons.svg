@@ -1,96 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg">
-  <!-- GitHub mark -->
-  <symbol id="github-icon" viewBox="0 0 24 24" fill="none">
-    <path fill="currentColor" fill-rule="evenodd" d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.866-.013-1.7-2.782.603-3.369-1.341-3.369-1.341-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.268 2.75 1.026A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.026 2.747-1.026.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10Z" clip-rule="evenodd"/>
+
+  <!-- GitHub -->
+  <symbol id="github-icon" viewBox="0 0 16 16">
+    <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
   </symbol>
 
-  <!-- Dependency graph / network — three connected nodes -->
-  <symbol id="graph-icon" viewBox="0 0 24 24" fill="none">
-    <circle cx="5" cy="12" r="2.5" stroke="currentColor" stroke-width="1.5"/>
-    <circle cx="19" cy="6" r="2.5" stroke="currentColor" stroke-width="1.5"/>
-    <circle cx="19" cy="18" r="2.5" stroke="currentColor" stroke-width="1.5"/>
-    <path d="M7.5 11 16.5 7M7.5 13l9 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- External link arrow -->
+  <symbol id="external-link-icon" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M6 3h7v7"/>
+    <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M13 3 6.5 9.5"/>
   </symbol>
 
-  <!-- Python logo (simplified) -->
-  <symbol id="python-icon" viewBox="0 0 24 24" fill="none">
-    <path d="M11.914 2c-2.628 0-4.378.563-4.378 2.25v1.875h4.5v.75H6.161c-1.753 0-3.286 1.054-3.766 3.063-.554 2.3-.578 3.737 0 6.14.43 1.788 1.455 3.047 3.207 3.047h2.074v-2.742c0-1.99 1.722-3.747 3.766-3.747h4.495c1.677 0 3.016-1.382 3.016-3.07V5.25c0-1.635-1.38-2.862-3.016-3.11A22 22 0 0 0 11.914 2m-2.43 1.313a1.125 1.125 0 1 1 0 2.25 1.125 1.125 0 0 1 0-2.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-    <path d="M12.086 22c2.628 0 4.378-.563 4.378-2.25v-1.875h-4.5v-.75h5.875c1.753 0 3.286-1.054 3.766-3.063.554-2.3.578-3.737 0-6.14-.43-1.788-1.455-3.047-3.207-3.047h-2.074v2.742c0 1.99-1.722 3.747-3.766 3.747H8.063c-1.677 0-3.016 1.382-3.016 3.07v4.316c0 1.635 1.38 2.862 3.016 3.11.963.148 2.002.14 4.023.14m2.43-1.313a1.125 1.125 0 1 1 0-2.25 1.125 1.125 0 0 1 0 2.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  </symbol>
-
-  <!-- Package / box -->
-  <symbol id="package-icon" viewBox="0 0 24 24" fill="none">
-    <path d="m12 2 9 4.5v11L12 22l-9-4.5v-11L12 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-    <path d="M12 22V11.5M12 11.5 3 7m9 4.5 9-4.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-    <path d="m7.5 4.25 9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  </symbol>
-
-  <!-- Search / magnifying glass -->
-  <symbol id="search-icon" viewBox="0 0 24 24" fill="none">
-    <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.5"/>
-    <path d="m16.5 16.5 4.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-  </symbol>
-
-  <!-- External link -->
-  <symbol id="external-link-icon" viewBox="0 0 24 24" fill="none">
-    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6m4-3h6v6m-11 5L21 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  </symbol>
-
-  <!-- Close / X -->
-  <symbol id="close-icon" viewBox="0 0 24 24" fill="none">
-    <path d="m18 6-12 12M6 6l12 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-  </symbol>
-
-  <!-- Info circle -->
-  <symbol id="info-icon" viewBox="0 0 24 24" fill="none">
-    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/>
-    <path d="M12 8h.01M12 11v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-  </symbol>
-
-  <!-- Warning triangle -->
-  <symbol id="warning-icon" viewBox="0 0 24 24" fill="none">
-    <path d="M12 9v4m0 3h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  </symbol>
-
-  <!-- Refresh / rebuild -->
-  <symbol id="refresh-icon" viewBox="0 0 24 24" fill="none">
-    <path d="M21 2v6h-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M3 12a9 9 0 0 1 15.36-6.36L21 8M3 22v-6h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M21 12a9 9 0 0 1-15.36 6.36L3 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  </symbol>
-
-  <!-- Trash / reset -->
-  <symbol id="trash-icon" viewBox="0 0 24 24" fill="none">
-    <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  </symbol>
-
-  <!-- Zoom in -->
-  <symbol id="zoom-in-icon" viewBox="0 0 24 24" fill="none">
-    <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.5"/>
-    <path d="m16.5 16.5 4.5 4.5M11 8v6m-3-3h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-  </symbol>
-
-  <!-- Zoom out -->
-  <symbol id="zoom-out-icon" viewBox="0 0 24 24" fill="none">
-    <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.5"/>
-    <path d="m16.5 16.5 4.5 4.5M8 11h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-  </symbol>
-
-  <!-- Fit to screen -->
-  <symbol id="fit-view-icon" viewBox="0 0 24 24" fill="none">
-    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  </symbol>
-
-  <!-- Copy to clipboard -->
-  <symbol id="copy-icon" viewBox="0 0 24 24" fill="none">
-    <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/>
-    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-  </symbol>
-
-  <!-- PyPI logo (simplified box with "Py") -->
-  <symbol id="pypi-icon" viewBox="0 0 24 24" fill="none">
-    <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" stroke-width="1.5"/>
-    <path d="M8 8h3a2.5 2.5 0 0 1 0 5H8V8Zm0 5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="m14 13 2-5 2 5m-1.5-7v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  </symbol>
 </svg>
