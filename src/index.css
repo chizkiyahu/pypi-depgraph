@@ -27,6 +27,11 @@
   --error-bg: rgba(255, 237, 237, 0.86);
   --ambient-orange: rgba(240, 138, 36, 0.32);
   --ambient-green: rgba(36, 71, 58, 0.18);
+  --scrollbar-track: rgba(36, 71, 58, 0.08);
+  --scrollbar-track-strong: rgba(36, 71, 58, 0.13);
+  --scrollbar-thumb: rgba(123, 61, 16, 0.34);
+  --scrollbar-thumb-hover: rgba(123, 61, 16, 0.52);
+  --scrollbar-thumb-active: rgba(123, 61, 16, 0.66);
   --shadow: 0 22px 60px rgba(74, 56, 24, 0.15);
   --radius-xl: 28px;
   --radius-lg: 18px;
@@ -113,6 +118,11 @@ ul {
     --error-bg: rgba(91, 40, 40, 0.72);
     --ambient-orange: rgba(240, 138, 36, 0.22);
     --ambient-green: rgba(86, 168, 132, 0.18);
+    --scrollbar-track: rgba(219, 239, 228, 0.06);
+    --scrollbar-track-strong: rgba(219, 239, 228, 0.1);
+    --scrollbar-thumb: rgba(126, 195, 163, 0.32);
+    --scrollbar-thumb-hover: rgba(126, 195, 163, 0.5);
+    --scrollbar-thumb-active: rgba(241, 154, 69, 0.72);
     --shadow: 0 30px 70px rgba(0, 0, 0, 0.32);
   }
 }

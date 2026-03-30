@@ -458,6 +458,62 @@
   transition: transform 220ms ease;
 }
 
+.settings-drawer,
+.inspector-body {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  overscroll-behavior: contain;
+}
+
+.settings-drawer::-webkit-scrollbar,
+.inspector-body::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.settings-drawer::-webkit-scrollbar-track,
+.inspector-body::-webkit-scrollbar-track {
+  margin: 10px;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, var(--scrollbar-track), var(--scrollbar-track-strong));
+}
+
+.settings-drawer::-webkit-scrollbar-thumb,
+.inspector-body::-webkit-scrollbar-thumb {
+  min-height: 48px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--scrollbar-thumb-hover), var(--scrollbar-thumb));
+  background-clip: padding-box;
+}
+
+.settings-drawer:hover::-webkit-scrollbar-thumb,
+.settings-drawer:focus-within::-webkit-scrollbar-thumb,
+.inspector-body:hover::-webkit-scrollbar-thumb,
+.inspector-body:focus-within::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--scrollbar-thumb-hover), var(--scrollbar-thumb));
+  background-clip: padding-box;
+}
+
+.settings-drawer::-webkit-scrollbar-thumb:hover,
+.inspector-body::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--scrollbar-thumb-active), var(--scrollbar-thumb-hover));
+  background-clip: padding-box;
+}
+
+.settings-drawer::-webkit-scrollbar-thumb:active,
+.inspector-body::-webkit-scrollbar-thumb:active {
+  background: linear-gradient(180deg, var(--scrollbar-thumb-active), var(--scrollbar-thumb-active));
+  background-clip: padding-box;
+}
+
+.settings-drawer::-webkit-scrollbar-corner,
+.inspector-body::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .settings-drawer.open {
   transform: translateX(0);
 }
