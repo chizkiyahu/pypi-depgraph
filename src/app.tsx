@@ -595,21 +595,28 @@ export function App() {
         <section class="panel graph-stage">
           <div class="graph-stage-header">
             <div class="graph-stage-title">
-              <div class="title-with-link">
+              <button class="home-link" type="button" onClick={handleReset} title="Back to home">
                 <p class="section-kicker">Dependency graph</p>
-                <a href="https://github.com/chizkiyahu/pypi_graph" target="_blank" rel="noopener noreferrer" class="social-link desktop-title-link" title="View source on GitHub" aria-label="View source on GitHub">
-                  <svg width="18" height="18" aria-hidden="true"><use href="#github-icon" /></svg>
-                  <svg width="14" height="14" aria-hidden="true" class="external-arrow"><use href="#external-link-icon" /></svg>
-                </a>
-              </div>
-              <h2>{result.effectiveInputs.packageName} graph</h2>
-              <p class="graph-stage-subtitle">
-                Click a node to inspect its constraints. Change graph direction and labels from the side menu.
-              </p>
+              </button>
+              <h2>{result.effectiveInputs.packageName}</h2>
             </div>
 
-            <div class="graph-stage-meta desktop-meta">
-              {renderMeta()}
+            <div class="graph-stage-actions desktop-meta">
+              <div class="stage-badges stage-badges-compact">
+                {graphMetrics.map((metric) => (
+                  <span class="summary-chip metric-chip">
+                    <strong>{metric.value}</strong> {metric.label}
+                  </span>
+                ))}
+                {activeEnvironment.map((item) => (
+                  <span class="summary-chip">{item}</span>
+                ))}
+              </div>
+              <a href="https://github.com/chizkiyahu/pypi_graph" target="_blank" rel="noopener noreferrer" class="social-link github-header-link" title="View source on GitHub" aria-label="View source on GitHub">
+                <svg width="20" height="20" aria-hidden="true"><use href="#github-icon" /></svg>
+                GitHub
+                <svg width="14" height="14" aria-hidden="true" class="external-arrow"><use href="#external-link-icon" /></svg>
+              </a>
             </div>
           </div>
 
