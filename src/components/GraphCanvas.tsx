@@ -1,12 +1,15 @@
 import cytoscape from 'cytoscape'
 import { useEffect, useRef } from 'preact/hooks'
-import type { GraphEdge, GraphNode } from '../types.ts'
+import type { GraphDirection, GraphEdge, GraphNode } from '../types.ts'
 
 interface GraphCanvasProps {
   nodes: GraphNode[]
   edges: GraphEdge[]
+  rootId: string | null
   selectedNodeId: string | null
-  onSelectNode: (nodeId: string) => void
+  direction: GraphDirection
+  showAllEdgeLabels: boolean
+  onSelectNode: (nodeId: string | null) => void
 }
 
 function prefersDarkTheme(): boolean {
@@ -16,33 +19,35 @@ function prefersDarkTheme(): boolean {
 }
 
 function buildGraphStyles(isDark: boolean) {
-  const nodeBackground = isDark ? '#243329' : '#f6f0dc'
-  const nodeBorder = isDark ? '#75a48e' : '#d1b85a'
-  const nodeInk = isDark ? '#eef4ef' : '#1f1d16'
+  const nodeBackground = isDark ? '#213027' : '#fff4d8'
+  const nodeBorder = isDark ? '#7ab395' : '#c7952e'
+  const nodeInk = isDark ? '#edf6f0' : '#1f1d16'
   const rootBackground = isDark ? '#df7b1c' : '#f08a24'
-  const unresolvedBackground = isDark ? '#5f3636' : '#f4d7d7'
-  const unresolvedBorder = isDark ? '#d98a8a' : '#ad4d4d'
-  const edgeColor = isDark ? '#9ac6b3' : '#718f81'
-  const edgeInk = isDark ? '#d7efe4' : '#375548'
-  const edgeLabelBackground = isDark ? '#17211c' : '#f7f3e6'
+  const unresolvedBackground = isDark ? '#553233' : '#f4d7d7'
+  const unresolvedBorder = isDark ? '#e59d9d' : '#ad4d4d'
+  const edgeColor = isDark ? '#7eb39a' : '#6c8a7b'
+  const edgeFocus = isDark ? '#ffd494' : '#c46c0b'
+  const edgeInk = isDark ? '#dff1e6' : '#355247'
+  const edgeLabelBackground = isDark ? '#16201b' : '#fffaf0'
 
   return [
     {
       selector: 'node',
       style: {
         shape: 'round-rectangle',
-        width: '190px',
-        height: '64px',
-        padding: '10px',
+        width: '236px',
+        height: '92px',
+        padding: '12px',
         'background-color': nodeBackground,
         'border-width': '2px',
         'border-color': nodeBorder,
         label: 'data(label)',
         color: nodeInk,
-        'font-size': '14px',
+        'font-size': '19px',
+        'font-weight': 600,
         'font-family': 'IBM Plex Sans, sans-serif',
         'text-wrap': 'wrap',
-        'text-max-width': '160px',
+        'text-max-width': '206px',
         'text-valign': 'center',
         'text-halign': 'center',
       },
@@ -50,8 +55,10 @@ function buildGraphStyles(isDark: boolean) {
     {
       selector: 'node[root = "true"]',
       style: {
+        width: '252px',
+        height: '98px',
         'background-color': rootBackground,
-        'border-color': isDark ? '#ffc58b' : '#7b3d10',
+        'border-color': isDark ? '#ffd8a5' : '#7b3d10',
         color: '#fffef5',
       },
     },
@@ -64,10 +71,20 @@ function buildGraphStyles(isDark: boolean) {
       },
     },
     {
-      selector: 'node[selected = "true"]',
+      selector: 'node.is-selected',
       style: {
         'border-width': '4px',
-        'border-color': isDark ? '#fff3c4' : '#123329',
+        'border-color': isDark ? '#fff3c4' : '#10372b',
+        'shadow-blur': 24,
+        'shadow-color': isDark ? '#f2b66c' : '#dc8b35',
+        'shadow-opacity': 0.28,
+      },
+    },
+    {
+      selector: 'node.is-neighbor',
+      style: {
+        'border-width': '3px',
+        'border-color': isDark ? '#b2e1c9' : '#35614f',
       },
     },
     {
@@ -79,14 +96,30 @@ function buildGraphStyles(isDark: boolean) {
         'target-arrow-shape': 'triangle',
         'curve-style': 'bezier',
         label: 'data(label)',
-        'font-size': '10px',
+        'font-size': '13px',
+        'font-weight': 600,
         'text-wrap': 'wrap',
-        'text-max-width': '180px',
+        'text-max-width': '220px',
         color: edgeInk,
         'text-background-color': edgeLabelBackground,
-        'text-background-opacity': 0.9,
-        'text-background-padding': '2px',
+        'text-background-opacity': 0.92,
+        'text-background-padding': '4px',
         'text-rotation': 'autorotate',
+      },
+    },
+    {
+      selector: 'edge.is-focus',
+      style: {
+        width: '3px',
+        'line-color': edgeFocus,
+        'target-arrow-color': edgeFocus,
+      },
+    },
+    {
+      selector: '.is-faded',
+      style: {
+        opacity: 0.14,
+        'text-opacity': 0,
       },
     },
   ] as cytoscape.StylesheetJson
@@ -107,13 +140,19 @@ export function GraphCanvas(props: GraphCanvasProps) {
       cytoscape({
         container,
         minZoom: 0.15,
-        maxZoom: 2.2,
+        maxZoom: 3.2,
         style: buildGraphStyles(prefersDarkTheme()),
       })
 
     cytoscapeRef.current = instance
+
     instance.on('tap', 'node', (event) => {
       props.onSelectNode(event.target.id())
+    })
+    instance.on('tap', (event) => {
+      if (event.target === instance) {
+        props.onSelectNode(null)
+      }
     })
 
     return () => {
@@ -134,9 +173,8 @@ export function GraphCanvas(props: GraphCanvasProps) {
           data: {
             id: node.id,
             label: `${node.packageName}\n${node.displayVersion}`,
-            root: String(node.depth === 0),
+            root: String(node.id === props.rootId),
             unresolved: String(node.kind === 'unresolved'),
-            selected: String(node.id === props.selectedNodeId),
           },
         })),
         edges: props.edges.map((edge) => ({
@@ -144,43 +182,52 @@ export function GraphCanvas(props: GraphCanvasProps) {
             id: edge.id,
             source: edge.source,
             target: edge.target,
-            label: edge.requirement.length > 60 ? `${edge.requirement.slice(0, 57)}...` : edge.requirement,
+            fullLabel: edge.requirement,
+            label: '',
           },
         })),
       },
     })
 
+    applyGraphFocus(instance, props.selectedNodeId, props.showAllEdgeLabels)
+
     instance.layout({
       name: 'breadthfirst',
       animate: true,
-      animationDuration: 250,
+      animationDuration: 220,
       directed: true,
       fit: true,
-      spacingFactor: props.nodes.length > 50 ? 1.3 : 1.65,
-      padding: 40,
+      roots: props.rootId ? [props.rootId] : undefined,
+      padding: props.nodes.length > 80 ? 28 : 36,
+      spacingFactor:
+        props.nodes.length > 140
+          ? 0.66
+          : props.nodes.length > 80
+            ? 0.74
+            : props.nodes.length > 40
+              ? 0.82
+              : 0.92,
+      avoidOverlap: true,
+      nodeDimensionsIncludeLabels: true,
+      grid: false,
+      transform: (_node, position) =>
+        props.direction === 'left-right'
+          ? {
+              x: position.y,
+              y: position.x,
+            }
+          : position,
     }).run()
-  }, [props.nodes, props.edges, props.selectedNodeId])
+  }, [props.nodes, props.edges, props.rootId, props.direction])
 
   useEffect(() => {
     const instance = cytoscapeRef.current
-    if (!instance || !props.selectedNodeId) {
+    if (!instance) {
       return
     }
 
-    instance.nodes().forEach((node) => {
-      node.data('selected', String(node.id() === props.selectedNodeId))
-    })
-    const selected = instance.getElementById(props.selectedNodeId)
-    if (selected.nonempty()) {
-      instance.animate({
-        fit: {
-          eles: selected,
-          padding: 100,
-        },
-        duration: 250,
-      })
-    }
-  }, [props.selectedNodeId])
+    applyGraphFocus(instance, props.selectedNodeId, props.showAllEdgeLabels)
+  }, [props.selectedNodeId, props.showAllEdgeLabels])
 
   useEffect(() => {
     return () => {
@@ -189,5 +236,113 @@ export function GraphCanvas(props: GraphCanvasProps) {
     }
   }, [])
 
-  return <div class="graph-canvas" ref={containerRef} />
+  function fitGraph() {
+    const instance = cytoscapeRef.current
+    if (!instance) {
+      return
+    }
+
+    instance.animate({
+      fit: {
+        eles: instance.elements(),
+        padding: 36,
+      },
+      duration: 240,
+    })
+  }
+
+  function zoomBy(multiplier: number) {
+    const instance = cytoscapeRef.current
+    if (!instance) {
+      return
+    }
+
+    const nextZoom = Math.max(instance.minZoom(), Math.min(instance.maxZoom(), instance.zoom() * multiplier))
+    instance.animate({
+      zoom: {
+        level: nextZoom,
+        renderedPosition: {
+          x: instance.width() / 2,
+          y: instance.height() / 2,
+        },
+      },
+      duration: 180,
+    })
+  }
+
+  function centerRoot() {
+    const instance = cytoscapeRef.current
+    if (!instance || !props.rootId) {
+      return
+    }
+
+    const root = instance.getElementById(props.rootId)
+    if (root.nonempty()) {
+      instance.animate({
+        fit: {
+          eles: root.closedNeighborhood(),
+          padding: 96,
+        },
+        duration: 240,
+      })
+    }
+  }
+
+  return (
+    <div class="graph-canvas-shell">
+      <div class="graph-toolbar">
+        <button class="graph-tool" type="button" onClick={() => zoomBy(1.2)}>
+          +
+        </button>
+        <button class="graph-tool" type="button" onClick={() => zoomBy(1 / 1.2)}>
+          -
+        </button>
+        <button class="graph-tool" type="button" onClick={fitGraph}>
+          Fit
+        </button>
+        <button class="graph-tool" type="button" onClick={centerRoot} disabled={!props.rootId}>
+          Root
+        </button>
+      </div>
+      <div class="graph-canvas" ref={containerRef} />
+    </div>
+  )
+}
+
+function applyGraphFocus(
+  instance: cytoscape.Core,
+  selectedNodeId: string | null,
+  showAllEdgeLabels: boolean,
+): void {
+  instance.elements().removeClass('is-selected is-neighbor is-focus is-faded')
+
+  const edges = instance.edges()
+  edges.forEach((edge) => {
+    edge.data('label', showAllEdgeLabels ? compactEdgeLabel(String(edge.data('fullLabel') ?? '')) : '')
+  })
+
+  if (!selectedNodeId) {
+    return
+  }
+
+  const selected = instance.getElementById(selectedNodeId)
+  if (selected.empty()) {
+    return
+  }
+
+  const neighborhood = selected.closedNeighborhood()
+  instance.elements().difference(neighborhood).addClass('is-faded')
+  selected.addClass('is-selected')
+  selected.neighborhood('node').addClass('is-neighbor')
+  selected.connectedEdges().addClass('is-focus')
+
+  if (!showAllEdgeLabels) {
+    selected.connectedEdges().forEach((edge) => {
+      edge.data('label', compactEdgeLabel(String(edge.data('fullLabel') ?? '')))
+    })
+  }
+}
+
+function compactEdgeLabel(label: string): string {
+  return label.length > 54 ? `${label.slice(0, 51)}...` : label
 }

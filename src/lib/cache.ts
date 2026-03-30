@@ -15,6 +15,10 @@ export class MemoryCacheStore implements CacheStore {
   async set<T>(entry: CacheEntry<T>): Promise<void> {
     this.store.set(entry.key, entry as CacheEntry<unknown>)
   }
+
+  async clear(): Promise<void> {
+    this.store.clear()
+  }
 }
 
 class IndexedDbCacheStore implements CacheStore {
@@ -70,6 +74,21 @@ class IndexedDbCacheStore implements CacheStore {
       })
     } catch {
       await this.fallback.set(entry)
+    }
+  }
+
+  async clear(): Promise<void> {
+    try {
+      const db = await this.openDb()
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite')
+        const store = tx.objectStore(STORE_NAME)
+        const request = store.clear()
+        request.onsuccess = () => resolve()
+        request.onerror = () => reject(request.error ?? new Error('Failed to clear cache'))
+      })
+    } catch {
+      await this.fallback.clear()
     }
   }
 }

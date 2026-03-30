@@ -1,7 +1,9 @@
-export type PlatformOption = 'linux' | 'windows' | 'macos'
+export type PlatformOption = string
+export type GraphDirection = 'top-bottom' | 'left-right'
 
 export interface ResolutionInputs {
   packageName: string
+  rootVersion: string | null
   pythonVersion: string
   platform: PlatformOption
   extras: string[]
@@ -18,6 +20,7 @@ export interface CacheEntry<T> {
 export interface CacheStore {
   get<T>(key: string): Promise<CacheEntry<T> | null>
   set<T>(entry: CacheEntry<T>): Promise<void>
+  clear(): Promise<void>
 }
 
 export interface PypiFile {
@@ -166,8 +169,10 @@ export interface ResolutionLimits {
 
 export interface RootOptions {
   extras: string[]
+  availableVersions: string[]
   supportedPythonVersions: string[]
   supportedPlatforms: PlatformOption[]
+  showVersionSelector: boolean
   showPythonSelector: boolean
   showPlatformSelector: boolean
 }

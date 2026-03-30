@@ -30,7 +30,7 @@ export function parseRequirement(raw: string): ParsedRequirement {
   if (remainder.startsWith('@')) {
     directReference = remainder.slice(1).trim()
   } else if (remainder) {
-    specifier = remainder.replace(/\s+/g, '')
+    specifier = normalizeSpecifierText(remainder)
   }
 
   return {
@@ -78,4 +78,13 @@ function splitRequirementMarker(raw: string): { requirementPart: string; markerT
     requirementPart: raw,
     markerText: null,
   }
+}
+
+function normalizeSpecifierText(input: string): string {
+  const compact = input.replace(/\s+/g, '')
+  if (compact.startsWith('(') && compact.endsWith(')')) {
+    return compact.slice(1, -1)
+  }
+
+  return compact
 }

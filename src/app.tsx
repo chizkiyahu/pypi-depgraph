@@ -2,11 +2,18 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import './app.css'
 import { GraphCanvas } from './components/GraphCanvas.tsx'
 import { createBrowserCacheStore } from './lib/cache.ts'
+import { formatPlatformOption } from './lib/platforms.ts'
 import { createPypiClient } from './lib/pypi.ts'
 import { resolveDependencyGraph } from './lib/resolver.ts'
 import { getDefaultInputs, readInputsFromUrl, writeInputsToUrl } from './lib/url-state.ts'
 import { normalizePackageName } from './lib/versions.ts'
-import type { GraphNode, PlatformOption, ResolutionInputs, ResolutionResult } from './types.ts'
+import type {
+  GraphDirection,
+  PlatformOption,
+  ResolutionInputs,
+  ResolutionResult,
+  RootOptions,
+} from './types.ts'
 
 const SAMPLE_PACKAGES = ['fastapi', 'httpx', 'apache-airflow', 'pydantic']
 
@@ -25,6 +32,10 @@ export function App() {
     initialInputs.packageName ? 'loading' : 'idle',
   )
   const [error, setError] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [graphDirection, setGraphDirection] = useState<GraphDirection>('top-bottom')
+  const [showAllEdgeLabels, setShowAllEdgeLabels] = useState(false)
+  const [cacheResetting, setCacheResetting] = useState(false)
   const latestRequestId = useRef(0)
   const syncingInputsRef = useRef(false)
 
@@ -45,6 +56,7 @@ export function App() {
     latestRequestId.current = requestId
     setStatus('loading')
     setError(null)
+    setSelectedNodeId(null)
 
     try {
       const nextResult = await resolveDependencyGraph(nextInputs, clientRef.current)
@@ -56,7 +68,6 @@ export function App() {
         setInputs(nextResult.effectiveInputs)
       }
       setResult(nextResult)
-      setSelectedNodeId(nextResult.rootId)
       setStatus('ready')
     } catch (resolveError) {
       if (latestRequestId.current !== requestId) {
@@ -96,6 +107,45 @@ export function App() {
     })
   }
 
+  function handleQuickStart(packageName: string) {
+    const nextInputs: ResolutionInputs = {
+      ...inputs,
+      packageName,
+      rootVersion: null,
+      extras: [],
+      manualVersions: {},
+    }
+    setInputs(nextInputs)
+    setMenuOpen(false)
+    void runResolution(nextInputs)
+  }
+
+  function handleReset() {
+    const nextInputs = getDefaultInputs()
+    setInputs(nextInputs)
+    setResult(null)
+    setSelectedNodeId(null)
+    setStatus('idle')
+    setError(null)
+    setMenuOpen(false)
+  }
+
+  async function handleResetCache() {
+    setCacheResetting(true)
+    setError(null)
+
+    try {
+      await cacheRef.current.clear()
+      if (inputs.packageName.trim()) {
+        await runResolution(inputs)
+      }
+    } catch (cacheError) {
+      setError(cacheError instanceof Error ? cacheError.message : 'The local cache could not be cleared.')
+    } finally {
+      setCacheResetting(false)
+    }
+  }
+
   useEffect(() => {
     if (syncingInputsRef.current) {
       syncingInputsRef.current = false
@@ -112,40 +162,123 @@ export function App() {
     JSON.stringify(inputs.manualVersions),
     inputs.platform,
     inputs.pythonVersion,
+    inputs.rootVersion,
   ])
 
   const hasFreshResult =
     result !== null &&
     normalizePackageName(inputs.packageName) === normalizePackageName(result.effectiveInputs.packageName)
-  const rootOptions = hasFreshResult ? result?.rootOptions ?? null : null
-  const extras = rootOptions?.extras ?? []
-  const pythonOptions = rootOptions?.supportedPythonVersions ?? []
-  const platformOptions = rootOptions?.supportedPlatforms ?? []
-  const showPythonSelector = Boolean(rootOptions?.showPythonSelector)
-  const showPlatformSelector = Boolean(rootOptions?.showPlatformSelector)
+  const editableRootOptions = hasFreshResult ? result?.rootOptions ?? null : null
+  const displayedInputs = result?.effectiveInputs ?? inputs
+  const displayedRootOptions = result?.rootOptions ?? null
+  const extras = editableRootOptions?.extras ?? []
+  const availableRootVersions = editableRootOptions?.availableVersions ?? []
+  const pythonOptions = editableRootOptions?.supportedPythonVersions ?? []
+  const platformOptions = editableRootOptions?.supportedPlatforms ?? []
+  const showVersionSelector = Boolean(editableRootOptions?.showVersionSelector)
+  const showPythonSelector = Boolean(editableRootOptions?.showPythonSelector)
+  const showPlatformSelector = Boolean(editableRootOptions?.showPlatformSelector)
   const selectedNode =
     selectedNodeId && result ? result.nodes.find((node) => node.id === selectedNodeId) ?? null : null
+  const rootNode =
+    result?.rootId ? result.nodes.find((node) => node.id === result.rootId) ?? null : null
+  const activeEnvironment = collectActiveEnvironment(displayedInputs, displayedRootOptions, rootNode?.displayVersion ?? null)
+
+  useEffect(() => {
+    if (!result) {
+      setMenuOpen(false)
+    }
+  }, [result])
+
+  if (!result) {
+    return (
+      <div class="shell landing-shell">
+        <div class="ambient ambient-left" />
+        <div class="ambient ambient-right" />
+
+        <main class="landing-stage">
+          <section class="panel landing-card">
+            <p class="eyebrow">PyPI atlas</p>
+            <h1>Enter a package name.</h1>
+            <p class="landing-copy">Build the graph first. Advanced settings appear only after the package metadata is loaded.</p>
+
+            <form class="landing-form" onSubmit={handleSubmit}>
+              <input
+                value={inputs.packageName}
+                onInput={(event) =>
+                  updateInputs((current) => ({
+                    ...current,
+                    packageName: (event.currentTarget as HTMLInputElement).value,
+                  }))}
+                placeholder="fastapi"
+                spellcheck={false}
+              />
+              <button class="primary landing-submit" type="submit" disabled={!inputs.packageName.trim() || status === 'loading'}>
+                {status === 'loading' ? 'Resolving...' : 'Build graph'}
+              </button>
+            </form>
+
+            <div class="landing-samples">
+              <span class="subtle-label">Try one</span>
+              {SAMPLE_PACKAGES.map((sample) => (
+                <button class="sample-link" type="button" onClick={() => handleQuickStart(sample)}>
+                  {sample}
+                </button>
+              ))}
+            </div>
+
+            {error ? (
+              <div class="inline-error">
+                <strong>Resolution failed.</strong>
+                <span>{error}</span>
+              </div>
+            ) : null}
+          </section>
+        </main>
+      </div>
+    )
+  }
+
+  const graphMetrics = [
+    { label: 'Nodes', value: result.nodes.length },
+    { label: 'Edges', value: result.edges.length },
+    { label: 'API calls', value: result.limits.networkRequests },
+    { label: 'Cache hits', value: result.limits.cacheHits },
+  ]
 
   return (
-    <div class="shell">
+    <div class="shell workspace-shell">
       <div class="ambient ambient-left" />
       <div class="ambient ambient-right" />
 
-      <header class="hero-panel">
-        <div class="hero-copy">
-          <p class="eyebrow">PyPI dependency atlas</p>
-          <h1>Inspect the graph fast.</h1>
-          <p class="lede">Fetch PyPI metadata, reuse a local cache, and switch only the root-level knobs that actually change the graph.</p>
-        </div>
-        <div class="hero-card">
-          <span>Static by design</span>
-          <p>GitHub Pages frontend, IndexedDB cache, recursive marker-aware resolution, no backend.</p>
-        </div>
-      </header>
+      <button
+        class={menuOpen ? 'menu-toggle active hidden' : 'menu-toggle'}
+        type="button"
+        onClick={() => setMenuOpen((current) => !current)}
+        aria-label="Open settings"
+      >
+        <span />
+        <span />
+        <span />
+      </button>
 
-      <section class="panel control-panel">
-        <form class="controls" onSubmit={handleSubmit}>
-          <label class="field package-field">
+      {menuOpen ? (
+        <button class="drawer-backdrop" type="button" onClick={() => setMenuOpen(false)} aria-label="Close settings" />
+      ) : null}
+
+      <aside class={menuOpen ? 'panel settings-drawer open' : 'panel settings-drawer'}>
+        <div class="drawer-head">
+          <div>
+            <p class="eyebrow">Settings</p>
+            <p class="drawer-title">Package inputs</p>
+          </div>
+          <button class="icon-button" type="button" onClick={() => setMenuOpen(false)}>
+            Close
+          </button>
+        </div>
+
+        <form class="drawer-form" onSubmit={handleSubmit}>
+          <label class="field">
             <span>Package</span>
             <input
               value={inputs.packageName}
@@ -154,14 +287,33 @@ export function App() {
                   ...current,
                   packageName: (event.currentTarget as HTMLInputElement).value,
                 }))}
-              placeholder="fastapi"
+              placeholder="Enter a PyPI package name"
               spellcheck={false}
             />
           </label>
 
+          {showVersionSelector ? (
+            <label class="field">
+              <span>Package version</span>
+              <select
+                value={inputs.rootVersion ?? ''}
+                onChange={(event) =>
+                  updateInputs((current) => ({
+                    ...current,
+                    rootVersion: (event.currentTarget as HTMLSelectElement).value || null,
+                  }))}
+              >
+                <option value="">Latest stable release</option>
+                {availableRootVersions.map((version) => (
+                  <option value={version}>{version}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
           {showPythonSelector ? (
-            <div class="field environment-field">
-              <span>Python versions from this package</span>
+            <div class="field">
+              <span>Python</span>
               <div class="pill-row">
                 {pythonOptions.map((version) => (
                   <button
@@ -181,8 +333,8 @@ export function App() {
           ) : null}
 
           {showPlatformSelector ? (
-            <div class="field environment-field">
-              <span>Platforms from this package</span>
+            <div class="field">
+              <span>Platform</span>
               <div class="pill-row">
                 {platformOptions.map((platform) => (
                   <button
@@ -190,22 +342,23 @@ export function App() {
                     class={platform === inputs.platform ? 'pill active' : 'pill'}
                     onClick={() => handlePlatformChange(platform)}
                   >
-                    {platform}
+                    {formatPlatformOption(platform)}
                   </button>
                 ))}
               </div>
             </div>
           ) : null}
 
-          <div class="field field-extras">
-            <span>Top-level extras</span>
-            <div class="extras-grid">
-              {extras.length > 0 ? (
-                extras.map((extra) => {
+          {extras.length > 0 ? (
+            <div class="field">
+              <span>Top-level extras</span>
+              <div class="extras-grid">
+                {extras.map((extra) => {
                   const active = inputs.extras.includes(extra)
                   return (
                     <label class={active ? 'chip active' : 'chip'}>
                       <input
+                        class="chip-input"
                         type="checkbox"
                         checked={active}
                         onChange={(event) => {
@@ -213,200 +366,159 @@ export function App() {
                           updateInputs((current) => ({
                             ...current,
                             extras: enabled
-                              ? [...new Set([...current.extras, extra])].sort((left, right) => left.localeCompare(right))
+                              ? [...new Set([...current.extras, extra])].sort((left, right) =>
+                                  left.localeCompare(right),
+                                )
                               : current.extras.filter((value) => value !== extra),
                           }))
                         }}
                       />
-                      <span>{extra}</span>
+                      <span class="checkbox-box" aria-hidden="true" />
+                      <span class="chip-label">{extra}</span>
                     </label>
                   )
-                })
-              ) : (
-                <p class="helper-text">Extras appear after the root package metadata is loaded.</p>
-              )}
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          <div class="field">
+            <span>Graph direction</span>
+            <div class="pill-row">
+              <button
+                type="button"
+                class={graphDirection === 'top-bottom' ? 'pill active' : 'pill'}
+                onClick={() => setGraphDirection('top-bottom')}
+              >
+                Top to bottom
+              </button>
+              <button
+                type="button"
+                class={graphDirection === 'left-right' ? 'pill active' : 'pill'}
+                onClick={() => setGraphDirection('left-right')}
+              >
+                Left to right
+              </button>
             </div>
           </div>
 
-          <div class="control-actions">
-            <button
-              class="primary"
-              type="submit"
-              disabled={!inputs.packageName.trim() || status === 'loading'}
-            >
-              {status === 'loading' ? 'Resolving graph...' : 'Build graph'}
+          <div class="field">
+            <span>Graph labels</span>
+            <label class={showAllEdgeLabels ? 'chip active drawer-toggle' : 'chip drawer-toggle'}>
+              <input
+                class="chip-input"
+                type="checkbox"
+                checked={showAllEdgeLabels}
+                onChange={(event) => setShowAllEdgeLabels((event.currentTarget as HTMLInputElement).checked)}
+              />
+              <span class="checkbox-box" aria-hidden="true" />
+              <span class="chip-label">Show all dependency edge labels</span>
+            </label>
+          </div>
+
+          <div class="drawer-actions">
+            <button class="primary" type="submit" disabled={!inputs.packageName.trim() || status === 'loading'}>
+              {status === 'loading' ? 'Resolving...' : 'Rebuild'}
+            </button>
+            <button class="secondary" type="button" onClick={handleReset}>
+              Reset
             </button>
             <button
               class="secondary"
               type="button"
-              onClick={() => {
-                const nextInputs = getDefaultInputs()
-                setInputs(nextInputs)
-                setResult(null)
-                setSelectedNodeId(null)
-                setStatus('idle')
-                setError(null)
-              }}
+              onClick={() => void handleResetCache()}
+              disabled={cacheResetting || status === 'loading'}
             >
-              Reset
+              {cacheResetting ? 'Clearing cache...' : 'Reset cache'}
             </button>
           </div>
         </form>
 
-        <div class="sample-row">
-          <span>Quick starts</span>
-          {SAMPLE_PACKAGES.map((sample) => (
-            <button
-              class="sample-link"
-              type="button"
-              onClick={() =>
-                setInputs((current) => ({
-                  ...current,
-                  packageName: sample,
-                  extras: [],
-                  manualVersions: {},
-                }))}
-            >
-              {sample}
-            </button>
-          ))}
+        <div class="drawer-footer">
+          <span class="subtle-label">Quick starts</span>
+          <div class="drawer-samples">
+            {SAMPLE_PACKAGES.map((sample) => (
+              <button class="sample-link" type="button" onClick={() => handleQuickStart(sample)}>
+                {sample}
+              </button>
+            ))}
+          </div>
         </div>
-      </section>
+      </aside>
 
-      {error ? (
-        <section class="panel error-panel">
-          <strong>Resolution failed.</strong>
-          <p>{error}</p>
-        </section>
-      ) : null}
+      <main class="workspace-main">
+        {error ? (
+          <div class="inline-error floating-error">
+            <strong>Resolution failed.</strong>
+            <span>{error}</span>
+          </div>
+        ) : null}
 
-      <section class="stats-grid">
-        <article class="stat-card">
-          <span>Nodes</span>
-          <strong>{result?.nodes.length ?? 0}</strong>
-        </article>
-        <article class="stat-card">
-          <span>Edges</span>
-          <strong>{result?.edges.length ?? 0}</strong>
-        </article>
-        <article class="stat-card">
-          <span>Cache hits</span>
-          <strong>{result?.limits.cacheHits ?? 0}</strong>
-        </article>
-        <article class="stat-card">
-          <span>Network calls</span>
-          <strong>{result?.limits.networkRequests ?? 0}</strong>
-        </article>
-      </section>
-
-      <section class="layout-grid">
-        <div class="panel graph-panel">
-          <div class="panel-header">
-            <div>
+        <section class="panel graph-stage">
+          <div class="graph-stage-header">
+            <div class="graph-stage-title">
               <p class="section-kicker">Dependency graph</p>
-              <h2>
-                {result
-                  ? `${result.effectiveInputs.packageName} graph`
-                  : inputs.packageName
-                    ? `${inputs.packageName} graph`
-                    : 'Load a package to begin'}
-              </h2>
+              <h2>{result.effectiveInputs.packageName} graph</h2>
+              <p class="graph-stage-subtitle">
+                Click a node to inspect its constraints. Change graph direction and labels from the side menu.
+              </p>
             </div>
-            {result ? (
-              <div class="summary-badges">
-                <span>{result.limits.cycleEdges} cycle edges</span>
-                <span>{result.limits.unresolvedNodes} unresolved</span>
-                <span>{result.limits.skippedDirectReferences} direct refs</span>
+
+            <div class="graph-stage-meta">
+              <div class="stage-badges stage-metrics">
+                {graphMetrics.map((metric) => (
+                  <span class="summary-chip metric-chip">
+                    <strong>{metric.value}</strong> {metric.label}
+                  </span>
+                ))}
               </div>
-            ) : null}
+              <div class="stage-badges">
+                {activeEnvironment.map((item) => (
+                  <span class="summary-chip">{item}</span>
+                ))}
+              </div>
+              <div class="stage-badges">
+                <span class="summary-chip">{result.limits.cycleEdges} cycle edges</span>
+                <span class="summary-chip">{result.limits.unresolvedNodes} unresolved</span>
+                <span class="summary-chip">{result.limits.skippedDirectReferences} direct refs</span>
+              </div>
+            </div>
           </div>
 
           <div class="graph-frame">
-            {result ? (
-              <GraphCanvas
-                nodes={result.nodes}
-                edges={result.edges}
-                selectedNodeId={selectedNodeId}
-                onSelectNode={setSelectedNodeId}
-              />
-            ) : (
-              <div class="graph-empty">
-                <p>Search a package, fetch its metadata, then inspect the recursive graph.</p>
-              </div>
-            )}
+            <GraphCanvas
+              nodes={result.nodes}
+              edges={result.edges}
+              rootId={result.rootId}
+              selectedNodeId={selectedNodeId}
+              direction={graphDirection}
+              showAllEdgeLabels={showAllEdgeLabels}
+              onSelectNode={setSelectedNodeId}
+            />
           </div>
-        </div>
+        </section>
 
-        <aside class="panel side-panel">
-          <div class="panel-header stacked">
-            <p class="section-kicker">Limits and choices</p>
-            <h2>Resolution lens</h2>
-          </div>
-
-          <div class="selection-card">
-            <span>Selected inputs</span>
-            <ul class="plain-list">
-              <li><strong>Package</strong> {inputs.packageName || 'none'}</li>
-              {showPythonSelector ? <li><strong>Python</strong> {inputs.pythonVersion}</li> : null}
-              {showPlatformSelector ? <li><strong>Platform</strong> {inputs.platform}</li> : null}
-              {extras.length > 0 ? (
-                <li><strong>Extras</strong> {inputs.extras.length ? inputs.extras.join(', ') : 'none'}</li>
-              ) : null}
-            </ul>
-          </div>
-
-          <div class="selection-card">
-            <span>Root package metadata</span>
-            <ul class="plain-list">
-              {showPythonSelector ? (
-                <li><strong>Python versions</strong> {pythonOptions.join(', ')}</li>
-              ) : null}
-              {showPlatformSelector ? (
-                <li><strong>Platforms</strong> {platformOptions.join(', ')}</li>
-              ) : null}
-              {extras.length > 0 ? (
-                <li><strong>Extras</strong> {extras.join(', ')}</li>
-              ) : null}
-              {!showPythonSelector && !showPlatformSelector && extras.length === 0 ? (
-                <li>No root-specific python/platform split was detected.</li>
-              ) : null}
-            </ul>
-          </div>
-
-          <div class="selection-card">
-            <span>Model limits</span>
-            <ul class="plain-list">
-              <li>Resolver is metadata-based and does not replicate pip’s SAT solving.</li>
-              <li>Direct URL dependencies are shown but not recursively expanded.</li>
-              <li>Extras can be changed only for the root package; downstream extras come from requirement declarations.</li>
-            </ul>
-          </div>
-
-          <div class="panel-header stacked">
-            <p class="section-kicker">Inspector</p>
-            <h2>{selectedNode ? selectedNode.packageName : 'Select a node'}</h2>
-          </div>
-
-            {selectedNode ? (
-              <NodeInspector
-                node={selectedNode}
-                rootId={result?.rootId ?? null}
-                onOverrideChange={(version) => {
-                  handleVersionOverride(selectedNode.packageName, version)
-                }}
-              />
-            ) : (
-            <p class="helper-text">Click a node in the graph to inspect its constraints, available versions, and excluded requirements.</p>
-          )}
-        </aside>
-      </section>
+        {selectedNode ? (
+          <aside class="inspector-sheet">
+            <NodeInspector
+              node={selectedNode}
+              rootId={result.rootId}
+              onClose={() => setSelectedNodeId(null)}
+              onOverrideChange={(version) => {
+                handleVersionOverride(selectedNode.packageName, version)
+              }}
+            />
+          </aside>
+        ) : null}
+      </main>
     </div>
   )
 }
 
 interface NodeInspectorProps {
-  node: GraphNode
+  node: ResolutionResult['nodes'][number]
   rootId: string | null
+  onClose: () => void
   onOverrideChange: (value: string) => void
 }
 
@@ -416,65 +528,92 @@ function NodeInspector(props: NodeInspectorProps) {
 
   return (
     <div class="inspector">
-      <p class="node-title">
-        {props.node.packageName} <span>{props.node.displayVersion}</span>
-      </p>
-      <p class="node-summary">{props.node.summary}</p>
+      <div class="inspector-head">
+        <div>
+          <p class="section-kicker">Inspector</p>
+          <p class="node-title">
+            {props.node.packageName} <span>{props.node.displayVersion}</span>
+          </p>
+        </div>
+        <button class="icon-button" type="button" onClick={props.onClose}>
+          Close
+        </button>
+      </div>
 
-      <ul class="plain-list">
-        <li><strong>Extras on this node</strong> {props.node.selectedExtras.length ? props.node.selectedExtras.join(', ') : 'none'}</li>
-        <li><strong>Requires Python</strong> {props.node.requiresPython ?? 'not declared'}</li>
-        <li><strong>Constraint fragments</strong> {props.node.combinedSpecifiers.join(', ') || 'none'}</li>
-        <li><strong>Metadata source</strong> {props.node.cacheSource}</li>
-      </ul>
+      <div class="inspector-body">
+        <p class="node-summary">{props.node.summary}</p>
 
-      {canOverride ? (
-        <label class="field">
-          <span>Manual version override</span>
-          <select value={overrideValue} onChange={(event) => props.onOverrideChange((event.currentTarget as HTMLSelectElement).value)}>
-            <option value="">Auto select latest legal version</option>
-            {props.node.availableVersions.slice(0, 120).map((version) => (
-              <option value={version}>{version}</option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-
-      {props.node.incomingRequirements.length > 0 ? (
         <div class="detail-block">
-          <span>Incoming requirements</span>
-          <ul class="detail-list">
-            {props.node.incomingRequirements.map((requirement) => (
-              <li>{requirement}</li>
-            ))}
+          <span>Node details</span>
+          <ul class="plain-list">
+            <li>
+              <strong>Extras on this node</strong>{' '}
+              {props.node.selectedExtras.length ? props.node.selectedExtras.join(', ') : 'none'}
+            </li>
+            <li>
+              <strong>Requires Python</strong> {props.node.requiresPython ?? 'not declared'}
+            </li>
+            <li>
+              <strong>Constraint fragments</strong> {props.node.combinedSpecifiers.join(', ') || 'none'}
+            </li>
+            <li>
+              <strong>Metadata source</strong> {props.node.cacheSource}
+            </li>
           </ul>
         </div>
-      ) : null}
 
-      {props.node.inactiveRequirements.length > 0 ? (
-        <div class="detail-block">
-          <span>Excluded in this view</span>
-          <ul class="detail-list muted">
-            {props.node.inactiveRequirements.slice(0, 8).map((requirement) => (
-              <li>
-                <strong>{requirement.raw}</strong>
-                <small>{requirement.reason}</small>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+        {canOverride ? (
+          <label class="field">
+            <span>Manual version override</span>
+            <select
+              value={overrideValue}
+              onChange={(event) =>
+                props.onOverrideChange((event.currentTarget as HTMLSelectElement).value)}
+            >
+              <option value="">Auto select latest legal version</option>
+              {props.node.availableVersions.slice(0, 120).map((version) => (
+                <option value={version}>{version}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
 
-      {props.node.notes.length > 0 ? (
-        <div class="detail-block">
-          <span>Notes</span>
-          <ul class="detail-list">
-            {props.node.notes.map((note) => (
-              <li>{note}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+        {props.node.incomingRequirements.length > 0 ? (
+          <div class="detail-block">
+            <span>Incoming requirements</span>
+            <ul class="detail-list">
+              {props.node.incomingRequirements.map((requirement) => (
+                <li>{requirement}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {props.node.inactiveRequirements.length > 0 ? (
+          <div class="detail-block">
+            <span>Excluded in this view</span>
+            <ul class="detail-list muted">
+              {props.node.inactiveRequirements.slice(0, 12).map((requirement) => (
+                <li>
+                  <strong>{requirement.raw}</strong>
+                  <small>{requirement.reason}</small>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {props.node.notes.length > 0 ? (
+          <div class="detail-block">
+            <span>Notes</span>
+            <ul class="detail-list">
+              {props.node.notes.map((note) => (
+                <li>{note}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -482,9 +621,33 @@ function NodeInspector(props: NodeInspectorProps) {
 function sameResolutionInputs(left: ResolutionInputs, right: ResolutionInputs): boolean {
   return (
     left.packageName === right.packageName &&
+    left.rootVersion === right.rootVersion &&
     left.pythonVersion === right.pythonVersion &&
     left.platform === right.platform &&
     left.extras.join(',') === right.extras.join(',') &&
     JSON.stringify(left.manualVersions) === JSON.stringify(right.manualVersions)
   )
+}
+
+function collectActiveEnvironment(
+  inputs: ResolutionInputs,
+  rootOptions: RootOptions | null,
+  resolvedRootVersion: string | null,
+): string[] {
+  const summary: string[] = []
+
+  if (resolvedRootVersion) {
+    summary.push(`version ${resolvedRootVersion}`)
+  }
+  if (rootOptions?.showPythonSelector) {
+    summary.push(`py ${inputs.pythonVersion}`)
+  }
+  if (rootOptions?.showPlatformSelector) {
+    summary.push(formatPlatformOption(inputs.platform))
+  }
+  if ((rootOptions?.extras.length ?? 0) > 0) {
+    summary.push(inputs.extras.length > 0 ? `extras ${inputs.extras.join(', ')}` : 'extras none')
+  }
+
+  return summary
 }

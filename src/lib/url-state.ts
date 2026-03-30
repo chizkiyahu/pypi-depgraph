@@ -1,10 +1,12 @@
 import type { PlatformOption, ResolutionInputs } from '../types.ts'
+import { DEFAULT_PLATFORM, normalizePlatformTarget } from './platforms.ts'
 import { COMMON_PYTHON_VERSIONS, normalizePackageName } from './versions.ts'
 
 const DEFAULT_INPUTS: ResolutionInputs = {
   packageName: '',
+  rootVersion: null,
   pythonVersion: '3.12',
-  platform: 'linux',
+  platform: DEFAULT_PLATFORM,
   extras: [],
   manualVersions: {},
 }
@@ -16,6 +18,7 @@ export function getDefaultInputs(): ResolutionInputs {
 export function readInputsFromUrl(): ResolutionInputs {
   const search = new URLSearchParams(window.location.search)
   const packageName = search.get('pkg')?.trim() ?? DEFAULT_INPUTS.packageName
+  const rootVersion = search.get('version')?.trim() ?? DEFAULT_INPUTS.rootVersion
   const pythonVersion = search.get('py')?.trim() ?? DEFAULT_INPUTS.pythonVersion
   const platform = parsePlatform(search.get('platform')) ?? DEFAULT_INPUTS.platform
   const extras = search
@@ -27,6 +30,7 @@ export function readInputsFromUrl(): ResolutionInputs {
 
   return {
     packageName,
+    rootVersion,
     pythonVersion: COMMON_PYTHON_VERSIONS.includes(pythonVersion) ? pythonVersion : pythonVersion,
     platform,
     extras,
@@ -38,6 +42,9 @@ export function writeInputsToUrl(inputs: ResolutionInputs): void {
   const search = new URLSearchParams()
   if (inputs.packageName.trim()) {
     search.set('pkg', inputs.packageName.trim())
+  }
+  if (inputs.rootVersion) {
+    search.set('version', inputs.rootVersion)
   }
   search.set('py', inputs.pythonVersion)
   search.set('platform', inputs.platform)
@@ -53,8 +60,8 @@ export function writeInputsToUrl(inputs: ResolutionInputs): void {
 }
 
 function parsePlatform(value: string | null): PlatformOption | null {
-  if (value === 'linux' || value === 'windows' || value === 'macos') {
-    return value
+  if (value?.trim()) {
+    return normalizePlatformTarget(value)
   }
   return null
 }

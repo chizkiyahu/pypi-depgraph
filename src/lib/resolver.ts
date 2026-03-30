@@ -21,7 +21,21 @@ import {
 } from './marker.ts'
 import type { PypiClient } from './pypi.ts'
 import { parseRequirement } from './requirements.ts'
-import { COMMON_PYTHON_VERSIONS, normalizePackageName, normalizePythonVersion, selectVersion, uniqueSorted } from './versions.ts'
+import {
+  COMMON_PLATFORM_OPTIONS,
+  getPlatformDescriptor,
+  normalizePlatformTarget,
+  sortPlatformOptions,
+} from './platforms.ts'
+import {
+  COMMON_PYTHON_VERSIONS,
+  normalizePackageName,
+  normalizePythonVersion,
+  selectVersion,
+  sortPythonVersions,
+  sortVersionsDescending,
+  uniqueSorted,
+} from './versions.ts'
 
 interface ResolveRequest {
   name: string
@@ -45,7 +59,12 @@ interface ResolverState {
   insights: ReturnType<typeof createMutableInsights>
 }
 
-const ALL_PLATFORMS: PlatformOption[] = ['linux', 'windows', 'macos']
+interface CompatibilityMatrix {
+  pythonToPlatforms: Map<string, Set<PlatformOption>>
+  platformToPython: Map<PlatformOption, Set<string>>
+  allPythonVersions: string[]
+  allPlatforms: PlatformOption[]
+}
 
 export async function resolveDependencyGraph(
   inputs: ResolutionInputs,
@@ -61,8 +80,10 @@ export async function resolveDependencyGraph(
       limits: emptyLimits(),
       rootOptions: {
         extras: [],
-        supportedPythonVersions: buildPythonCandidatePool(inputs.pythonVersion),
-        supportedPlatforms: ALL_PLATFORMS,
+        availableVersions: [],
+        supportedPythonVersions: buildPythonCandidatePool(inputs.pythonVersion, []),
+        supportedPlatforms: COMMON_PLATFORM_OPTIONS,
+        showVersionSelector: false,
         showPythonSelector: false,
         showPlatformSelector: false,
       },
@@ -71,11 +92,12 @@ export async function resolveDependencyGraph(
   }
 
   const rootProject = await client.getProject(normalizedRoot)
+  const rootSnapshot = projectSnapshotFromReleases(rootProject.data.releases)
   const rootExtras = uniqueSorted([
     ...(rootProject.data.info.provides_extra ?? []),
     ...extractRootExtras(rootProject.data.info.requires_dist ?? []),
   ])
-  const rootOptions = deriveRootOptions(rootProject.data, inputs, rootExtras)
+  const rootOptions = deriveRootOptions(rootProject.data, rootSnapshot, inputs, rootExtras)
   const effectiveInputs = sanitizeInputs(inputs, rootOptions)
   const state: ResolverState = {
     nodes: new Map<string, GraphNode>(),
@@ -86,7 +108,7 @@ export async function resolveDependencyGraph(
   }
 
   recordFetchSource(state.limits, rootProject.source)
-  state.projectSnapshots.set(normalizedRoot, projectSnapshotFromReleases(rootProject.data.releases))
+  state.projectSnapshots.set(normalizedRoot, rootSnapshot)
 
   const rootId = await resolveNode(
     {
@@ -138,8 +160,14 @@ async function resolveNode(
 
   const snapshot = state.projectSnapshots.get(request.normalizedName)!
   const availableVersions = snapshot.releases.filter((version) => !snapshot.yankedVersions.has(version))
-  const manualOverride = inputs.manualVersions[request.normalizedName] ?? null
-  const versionChoice = selectVersion(availableVersions, request.specifiers, manualOverride)
+  const manualOverride =
+    request.depth === 0
+      ? inputs.rootVersion
+      : inputs.manualVersions[request.normalizedName] ?? null
+  const versionChoice =
+    request.depth === 0
+      ? selectRootVersion(availableVersions, manualOverride)
+      : selectVersion(availableVersions, request.specifiers, manualOverride)
 
   if (!versionChoice.selectedVersion) {
     state.limits.unresolvedNodes += 1
@@ -280,13 +308,15 @@ async function resolveNode(
 }
 
 function buildMarkerContext(inputs: ResolutionInputs, selectedExtras: string[]): MarkerContext {
+  const platform = getPlatformDescriptor(inputs.platform)
+
   return {
     pythonVersion: inputs.pythonVersion,
     pythonFullVersion: normalizePythonVersion(inputs.pythonVersion),
-    sysPlatform: platformToSysPlatform(inputs.platform),
-    platformSystem: platformToPlatformSystem(inputs.platform),
-    osName: inputs.platform === 'windows' ? 'nt' : 'posix',
-    platformMachine: 'x86_64',
+    sysPlatform: platform.sysPlatform,
+    platformSystem: platform.platformSystem,
+    osName: platform.osName,
+    platformMachine: platform.machine,
     implementationName: 'cpython',
     implementationVersion: normalizePythonVersion(inputs.pythonVersion),
     platformPythonImplementation: 'CPython',
@@ -294,38 +324,39 @@ function buildMarkerContext(inputs: ResolutionInputs, selectedExtras: string[]):
   }
 }
 
-function platformToSysPlatform(platform: PlatformOption): string {
-  if (platform === 'windows') {
-    return 'win32'
-  }
-  if (platform === 'macos') {
-    return 'darwin'
-  }
-  return 'linux'
-}
-
-function platformToPlatformSystem(platform: PlatformOption): string {
-  if (platform === 'windows') {
-    return 'Windows'
-  }
-  if (platform === 'macos') {
-    return 'Darwin'
-  }
-  return 'Linux'
-}
-
 function deriveRootOptions(
   rootProject: PypiProjectResponse,
+  rootSnapshot: ProjectSnapshot,
   inputs: ResolutionInputs,
   rootExtras: string[],
 ): RootOptions {
   const sanitizedExtras = inputs.extras.filter((extra) => rootExtras.includes(extra))
   const parsedRequirements = parseRequirementList(rootProject.info.requires_dist ?? [])
-  const pythonPool = buildPythonCandidatePool(inputs.pythonVersion)
-  const supportedPythonVersions = deriveSupportedPythonVersions(rootProject, pythonPool)
-  const supportedPlatforms = inferSupportedPlatforms(rootProject.releases[rootProject.info.version] ?? [])
-  const effectivePythonVersion = pickSupportedPythonVersion(inputs.pythonVersion, supportedPythonVersions)
-  const effectivePlatform = pickSupportedPlatform(inputs.platform, supportedPlatforms)
+  const availableVersions = sortVersionsDescending(
+    rootSnapshot.releases.filter((version) => !rootSnapshot.yankedVersions.has(version)),
+  )
+  const selectedOrDefaultVersion =
+    pickSupportedRootVersion(inputs.rootVersion, availableVersions) ??
+    selectRootVersion(availableVersions, null).selectedVersion ??
+    rootProject.info.version
+  const selectedVersionFiles =
+    rootProject.releases[selectedOrDefaultVersion] ?? rootProject.releases[rootProject.info.version] ?? []
+  const pythonPool = buildPythonCandidatePool(inputs.pythonVersion, selectedVersionFiles)
+  const compatibility = buildCompatibilityMatrix(
+    selectedVersionFiles,
+    pythonPool,
+    rootProject.info.requires_python,
+  )
+
+  let supportedPlatforms = deriveSupportedPlatforms(compatibility, inputs.pythonVersion)
+  let effectivePlatform = pickSupportedPlatform(inputs.platform, supportedPlatforms)
+  let supportedPythonVersions = deriveSupportedPythonVersions(compatibility, effectivePlatform, pythonPool)
+  let effectivePythonVersion = pickSupportedPythonVersion(inputs.pythonVersion, supportedPythonVersions)
+
+  supportedPlatforms = deriveSupportedPlatforms(compatibility, effectivePythonVersion)
+  effectivePlatform = pickSupportedPlatform(effectivePlatform, supportedPlatforms)
+  supportedPythonVersions = deriveSupportedPythonVersions(compatibility, effectivePlatform, pythonPool)
+  effectivePythonVersion = pickSupportedPythonVersion(effectivePythonVersion, supportedPythonVersions)
 
   const pythonSensitive = hasRequirementVariation(
     parsedRequirements,
@@ -358,42 +389,59 @@ function deriveRootOptions(
 
   return {
     extras: rootExtras,
+    availableVersions,
     supportedPythonVersions,
     supportedPlatforms,
+    showVersionSelector: availableVersions.length > 1,
     showPythonSelector:
       supportedPythonVersions.length < pythonPool.length || pythonSensitive,
     showPlatformSelector:
-      supportedPlatforms.length < ALL_PLATFORMS.length || platformSensitive,
+      supportedPlatforms.length < COMMON_PLATFORM_OPTIONS.length || platformSensitive,
   }
 }
 
 function sanitizeInputs(inputs: ResolutionInputs, rootOptions: RootOptions): ResolutionInputs {
   return {
     ...inputs,
+    rootVersion: pickSupportedRootVersion(inputs.rootVersion, rootOptions.availableVersions),
     pythonVersion: pickSupportedPythonVersion(inputs.pythonVersion, rootOptions.supportedPythonVersions),
     platform: pickSupportedPlatform(inputs.platform, rootOptions.supportedPlatforms),
     extras: inputs.extras.filter((extra) => rootOptions.extras.includes(extra)),
   }
 }
 
-function buildPythonCandidatePool(selectedVersion: string): string[] {
-  const pool = [...COMMON_PYTHON_VERSIONS]
-  if (selectedVersion && !pool.includes(selectedVersion)) {
-    pool.unshift(selectedVersion)
-  }
-
-  return pool
+function buildPythonCandidatePool(selectedVersion: string, files: PypiFile[]): string[] {
+  return sortPythonVersions([
+    ...COMMON_PYTHON_VERSIONS,
+    ...extractExplicitPythonVersionsFromFiles(files),
+    selectedVersion,
+  ])
 }
 
 function deriveSupportedPythonVersions(
-  rootProject: PypiProjectResponse,
+  compatibility: CompatibilityMatrix,
+  platform: PlatformOption,
   pool: string[],
 ): string[] {
-  const supported = pool.filter((version) =>
-    supportsPythonSpecifier(rootProject.info.requires_python, version),
-  )
+  const normalizedPlatform = normalizePlatformTarget(platform)
+  const supported = compatibility.platformToPython.get(normalizedPlatform)
+  if (supported && supported.size > 0) {
+    return sortPythonVersions(supported)
+  }
 
-  return supported.length > 0 ? supported : pool
+  return sortPythonVersions(compatibility.allPythonVersions.length > 0 ? compatibility.allPythonVersions : pool)
+}
+
+function deriveSupportedPlatforms(
+  compatibility: CompatibilityMatrix,
+  pythonVersion: string,
+): PlatformOption[] {
+  const supported = compatibility.pythonToPlatforms.get(pythonVersion)
+  if (supported && supported.size > 0) {
+    return sortPlatformOptions(supported)
+  }
+
+  return compatibility.allPlatforms
 }
 
 function supportsPythonSpecifier(specifier: string | null, version: string): boolean {
@@ -408,32 +456,212 @@ function supportsPythonSpecifier(specifier: string | null, version: string): boo
   }
 }
 
-function inferSupportedPlatforms(files: PypiFile[]): PlatformOption[] {
-  if (files.length === 0) {
-    return ALL_PLATFORMS
-  }
-
-  const supported = new Set<PlatformOption>()
+function buildCompatibilityMatrix(
+  files: PypiFile[],
+  pythonPool: string[],
+  requiresPython: string | null,
+): CompatibilityMatrix {
+  const pythonToPlatforms = new Map<string, Set<PlatformOption>>()
+  const platformToPython = new Map<PlatformOption, Set<string>>()
+  const allPlatforms = extractExplicitPlatformTargetsFromFiles(files)
+  const platformPool = allPlatforms.length > 0 ? allPlatforms : COMMON_PLATFORM_OPTIONS
 
   for (const file of files) {
-    const normalized = file.filename.toLowerCase()
+    const explicitPlatforms = inferPlatformTargetsFromFile(file)
+    const filePlatforms =
+      explicitPlatforms && explicitPlatforms.length > 0 ? explicitPlatforms : platformPool
+    const fileRequiresPython = file.requires_python ?? requiresPython
+    const explicitPythonVersions = inferPythonVersionsForFile(file, pythonPool, fileRequiresPython)
+    const filePythonVersions =
+      explicitPythonVersions.length > 0
+        ? explicitPythonVersions
+        : pythonPool.filter((version) => supportsPythonSpecifier(fileRequiresPython, version))
 
-    if (file.packagetype === 'sdist' || normalized.endsWith('-any.whl')) {
-      return ALL_PLATFORMS
-    }
+    for (const pythonVersion of filePythonVersions) {
+      const compatibilityPythonVersion = pythonVersion
+      const pythonPlatforms = pythonToPlatforms.get(compatibilityPythonVersion) ?? new Set<PlatformOption>()
+      pythonToPlatforms.set(compatibilityPythonVersion, pythonPlatforms)
 
-    if (normalized.includes('manylinux') || normalized.includes('musllinux') || normalized.includes('linux')) {
-      supported.add('linux')
-    }
-    if (normalized.includes('win32') || normalized.includes('win_amd64') || normalized.includes('win_arm64')) {
-      supported.add('windows')
-    }
-    if (normalized.includes('macosx') || normalized.includes('darwin')) {
-      supported.add('macos')
+      for (const platform of filePlatforms) {
+        const normalizedPlatform = normalizePlatformTarget(platform)
+        pythonPlatforms.add(normalizedPlatform)
+
+        const platformVersions = platformToPython.get(normalizedPlatform) ?? new Set<string>()
+        platformToPython.set(normalizedPlatform, platformVersions)
+        platformVersions.add(compatibilityPythonVersion)
+      }
     }
   }
 
-  return supported.size > 0 ? ALL_PLATFORMS.filter((platform) => supported.has(platform)) : ALL_PLATFORMS
+  if (pythonToPlatforms.size === 0) {
+    for (const pythonVersion of pythonPool.filter((version) => supportsPythonSpecifier(requiresPython, version))) {
+      const pythonPlatforms = pythonToPlatforms.get(pythonVersion) ?? new Set<PlatformOption>()
+      pythonToPlatforms.set(pythonVersion, pythonPlatforms)
+
+      for (const platform of platformPool) {
+        pythonPlatforms.add(platform)
+        const platformVersions = platformToPython.get(platform) ?? new Set<string>()
+        platformToPython.set(platform, platformVersions)
+        platformVersions.add(pythonVersion)
+      }
+    }
+  }
+
+  return {
+    pythonToPlatforms,
+    platformToPython,
+    allPythonVersions: sortPythonVersions(pythonToPlatforms.keys()),
+    allPlatforms: sortPlatformOptions(platformToPython.keys()),
+  }
+}
+
+function inferPythonVersionsForFile(
+  file: PypiFile,
+  pool: string[],
+  requiresPython: string | null,
+): string[] {
+  const normalizedFilename = file.filename.toLowerCase()
+  const pythonTag = file.python_version.toLowerCase()
+
+  if (
+    file.packagetype === 'sdist' ||
+    pythonTag === 'source' ||
+    normalizedFilename.endsWith('-any.whl') ||
+    pythonTag === 'py3' ||
+    pythonTag === 'py2.py3'
+  ) {
+    return []
+  }
+
+  if (normalizedFilename.includes('-abi3-')) {
+    const minimumVersion = sortPythonVersions(
+      extractExplicitPythonVersions(normalizedFilename, pythonTag).filter(
+        (version) => !version.endsWith('t'),
+      ),
+    )[0]
+
+    if (!minimumVersion) {
+      return []
+    }
+
+    return sortPythonVersions(
+      pool.filter((version) =>
+        !version.endsWith('t') &&
+        supportsPythonSpecifier(`>=${minimumVersion}`, version) &&
+        supportsPythonSpecifier(requiresPython, version),
+      ),
+    )
+  }
+
+  return sortPythonVersions(
+    extractExplicitPythonVersions(normalizedFilename, pythonTag).filter((version) =>
+      supportsPythonSpecifier(requiresPython, version),
+    ),
+  )
+}
+
+function extractExplicitPythonVersionsFromFiles(files: PypiFile[]): string[] {
+  const versions = new Set<string>()
+
+  for (const file of files) {
+    for (const version of extractExplicitPythonVersions(file.filename.toLowerCase(), file.python_version.toLowerCase())) {
+      versions.add(version)
+    }
+  }
+
+  return sortPythonVersions(versions)
+}
+
+function extractExplicitPythonVersions(filename: string, pythonTag: string): string[] {
+  const versions = new Set<string>()
+  const source = `${filename}-${pythonTag}`
+
+  for (const match of source.matchAll(/(?:^|[-_.])(?:cp|py)(\d)(\d{1,2})(t?)(?=$|[-_.])/g)) {
+    if (match[1] !== '3') {
+      continue
+    }
+
+    const minor = String(Number(match[2]))
+    const threadedSuffix = match[3] === 't' ? 't' : ''
+    versions.add(`3.${minor}${threadedSuffix}`)
+  }
+
+  return sortPythonVersions(versions)
+}
+
+function extractExplicitPlatformTargetsFromFiles(files: PypiFile[]): PlatformOption[] {
+  const targets = new Set<PlatformOption>()
+
+  for (const file of files) {
+    for (const target of inferPlatformTargetsFromFile(file) ?? []) {
+      targets.add(target)
+    }
+  }
+
+  return sortPlatformOptions(targets)
+}
+
+function inferPlatformTargetsFromFile(file: PypiFile): PlatformOption[] | null {
+  const normalized = file.filename.toLowerCase()
+  const pythonTag = file.python_version.toLowerCase()
+
+  if (
+    file.packagetype === 'sdist' ||
+    pythonTag === 'source' ||
+    normalized.endsWith('-any.whl') ||
+    pythonTag === 'py3' ||
+    pythonTag === 'py2.py3'
+  ) {
+    return null
+  }
+
+  const targets = new Set<PlatformOption>()
+
+  if (normalized.includes('manylinux') || normalized.includes('musllinux') || normalized.includes('linux')) {
+    if (normalized.includes('aarch64') || normalized.includes('arm64')) {
+      targets.add('linux-aarch64')
+    }
+    if (normalized.includes('x86_64') || normalized.includes('amd64')) {
+      targets.add('linux-x86_64')
+    }
+    if (normalized.includes('armv7l')) {
+      targets.add('linux-armv7l')
+    }
+    if (normalized.includes('ppc64le')) {
+      targets.add('linux-ppc64le')
+    }
+    if (normalized.includes('s390x')) {
+      targets.add('linux-s390x')
+    }
+    if (normalized.includes('i686') || normalized.includes('i386')) {
+      targets.add('linux-x86')
+    }
+  }
+
+  if (normalized.includes('win_amd64')) {
+    targets.add('windows-x86_64')
+  }
+  if (normalized.includes('win_arm64')) {
+    targets.add('windows-arm64')
+  }
+  if (normalized.includes('win32')) {
+    targets.add('windows-x86')
+  }
+
+  if (normalized.includes('macosx') || normalized.includes('darwin')) {
+    if (normalized.includes('universal2')) {
+      targets.add('macos-arm64')
+      targets.add('macos-x86_64')
+    }
+    if (normalized.includes('arm64')) {
+      targets.add('macos-arm64')
+    }
+    if (normalized.includes('x86_64')) {
+      targets.add('macos-x86_64')
+    }
+  }
+
+  return targets.size > 0 ? sortPlatformOptions(targets) : null
 }
 
 function parseRequirementList(requiresDist: string[]): ParsedRequirement[] {
@@ -490,15 +718,53 @@ function pickSupportedPythonVersion(selected: string, supported: string[]): stri
     return selected
   }
 
-  return supported[supported.length - 1] ?? selected
+  const standardFallback = [...supported].reverse().find((version) => !version.endsWith('t'))
+  return standardFallback ?? supported[supported.length - 1] ?? selected
+}
+
+function pickSupportedRootVersion(selected: string | null, supported: string[]): string | null {
+  if (!selected) {
+    return null
+  }
+
+  return supported.includes(selected) ? selected : null
 }
 
 function pickSupportedPlatform(selected: PlatformOption, supported: PlatformOption[]): PlatformOption {
-  if (supported.includes(selected)) {
-    return selected
+  const normalized = normalizePlatformTarget(selected)
+  if (supported.includes(normalized)) {
+    return normalized
   }
 
-  return supported[0] ?? selected
+  const selectedFamily = getPlatformDescriptor(normalized).family
+  const familyFallback = supported.find((platform) => getPlatformDescriptor(platform).family === selectedFamily)
+  return familyFallback ?? supported[0] ?? normalized
+}
+
+function selectRootVersion(
+  versions: string[],
+  requestedVersion: string | null,
+): {
+  selectedVersion: string | null
+  legalVersions: string[]
+  rejectionReason: string | null
+} {
+  if (requestedVersion) {
+    return {
+      selectedVersion: versions.includes(requestedVersion) ? requestedVersion : null,
+      legalVersions: versions,
+      rejectionReason: versions.includes(requestedVersion)
+        ? null
+        : `Requested root version ${requestedVersion} was not available on PyPI.`,
+    }
+  }
+
+  const autoSelected = selectVersion(versions, [])
+  return {
+    selectedVersion: autoSelected.selectedVersion,
+    legalVersions: versions,
+    rejectionReason: autoSelected.rejectionReason,
+  }
 }
 
 function projectSnapshotFromReleases(releases: Record<string, { yanked: boolean }[]>): ProjectSnapshot {
