@@ -235,7 +235,7 @@ export function App() {
             ) : null}
 
             <div class="landing-footer">
-              <a href="https://github.com/chizkiyahu/pypi_gragh" target="_blank" rel="noopener noreferrer" class="social-link">
+              <a href="https://github.com/chizkiyahu/pypi_graph" target="_blank" rel="noopener noreferrer" class="social-link">
                 <svg width="20" height="20" aria-hidden="true"><use href="/icons.svg#github-icon" /></svg>
                 View on GitHub
               </a>
@@ -480,7 +480,7 @@ export function App() {
             ))}
           </div>
           <div class="drawer-footer-links">
-            <a href="https://github.com/chizkiyahu/pypi_gragh" target="_blank" rel="noopener noreferrer" class="social-link">
+            <a href="https://github.com/chizkiyahu/pypi_graph" target="_blank" rel="noopener noreferrer" class="social-link">
               <svg width="20" height="20" aria-hidden="true"><use href="/icons.svg#github-icon" /></svg>
               GitHub Repository
             </a>
@@ -501,7 +501,7 @@ export function App() {
             <div class="graph-stage-title">
               <div class="title-with-link">
                 <p class="section-kicker">Dependency graph</p>
-                <a href="https://github.com/chizkiyahu/pypi_gragh" target="_blank" rel="noopener noreferrer" class="social-link desktop-title-link" title="View source on GitHub">
+                <a href="https://github.com/chizkiyahu/pypi_graph" target="_blank" rel="noopener noreferrer" class="social-link desktop-title-link" title="View source on GitHub">
                   <svg width="20" height="20" aria-hidden="true"><use href="/icons.svg#github-icon" /></svg>
                 </a>
               </div>

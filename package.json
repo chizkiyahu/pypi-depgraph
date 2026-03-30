@@ -1,5 +1,5 @@
 {
-  "name": "pypi_gragh",
+  "name": "pypi_graph",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -19,6 +19,7 @@
     "@types/node": "^24.12.0",
     "typescript": "~5.9.3",
     "vite": "^8.0.1",
+    "vite-plugin-singlefile": "^2.3.2",
     "vitest": "^4.1.2"
   }
 }
