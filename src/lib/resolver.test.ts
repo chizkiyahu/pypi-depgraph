@@ -602,6 +602,129 @@ describe('resolver integration', () => {
     expect(graph.rootOptions.showPythonSelector).toBe(true)
   })
 
+  it('propagates platform and python support from nested dependencies', async () => {
+    const fixtures = new Map<string, object>([
+      [
+        'https://pypi.org/pypi/demo/json',
+        {
+          info: {
+            name: 'demo',
+            version: '1.0.0',
+            summary: 'demo root',
+            requires_dist: ['middle>=1'],
+            requires_python: null,
+            provides_extra: null,
+            package_url: 'https://pypi.org/project/demo/',
+          },
+          releases: {
+            '1.0.0': [
+              {
+                filename: 'demo-1.0.0.tar.gz',
+                packagetype: 'sdist',
+                python_version: 'source',
+                requires_python: null,
+                yanked: false,
+              },
+            ],
+          },
+        },
+      ],
+      [
+        'https://pypi.org/pypi/middle/json',
+        {
+          info: {
+            name: 'middle',
+            version: '1.0.0',
+            summary: 'middle layer',
+            requires_dist: ['leaf>=2'],
+            requires_python: null,
+            provides_extra: null,
+            package_url: 'https://pypi.org/project/middle/',
+          },
+          releases: {
+            '1.0.0': [
+              {
+                filename: 'middle-1.0.0.tar.gz',
+                packagetype: 'sdist',
+                python_version: 'source',
+                requires_python: null,
+                yanked: false,
+              },
+            ],
+          },
+        },
+      ],
+      [
+        'https://pypi.org/pypi/leaf/json',
+        {
+          info: {
+            name: 'leaf',
+            version: '2.0.0',
+            summary: 'restricted leaf',
+            requires_dist: null,
+            requires_python: '>=3.12,<3.13',
+            provides_extra: null,
+            package_url: 'https://pypi.org/project/leaf/',
+          },
+          releases: {
+            '2.0.0': [
+              {
+                filename: 'leaf-2.0.0-cp312-cp312-manylinux_2_17_x86_64.whl',
+                packagetype: 'bdist_wheel',
+                python_version: 'cp312',
+                requires_python: '>=3.12,<3.13',
+                yanked: false,
+              },
+              {
+                filename: 'leaf-2.0.0-cp312-cp312-macosx_11_0_arm64.whl',
+                packagetype: 'bdist_wheel',
+                python_version: 'cp312',
+                requires_python: '>=3.12,<3.13',
+                yanked: false,
+              },
+            ],
+          },
+        },
+      ],
+    ])
+
+    const fetcher = async (input: RequestInfo | URL) => {
+      const key = String(input)
+      const data = fixtures.get(key)
+      if (!data) {
+        return new Response('Not found', { status: 404 })
+      }
+      return new Response(JSON.stringify(data), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+    }
+
+    const client = createPypiClient({
+      cache: new MemoryCacheStore(),
+      fetcher,
+      ttlMs: 1000 * 60 * 60,
+    })
+
+    const graph = await resolveDependencyGraph({
+      packageName: 'demo',
+      rootVersion: null,
+      pythonVersion: '3.11',
+      platform: 'windows-x86_64',
+      extras: [],
+      manualVersions: {},
+    }, client)
+
+    expect(graph.rootOptions.supportedPythonVersions).toEqual(['3.12'])
+    expect(graph.rootOptions.supportedPlatforms).toEqual(['linux-x86_64', 'macos-arm64'])
+    expect(graph.effectiveInputs.pythonVersion).toBe('3.12')
+    expect(graph.effectiveInputs.platform).toBe('linux-x86_64')
+    expect(graph.rootOptions.showPythonSelector).toBe(true)
+    expect(graph.rootOptions.showPlatformSelector).toBe(true)
+  })
+
   it('shows TensorFlow-style wheel targets as distinct supported platforms', async () => {
     const fixtures = new Map<string, object>([
       [

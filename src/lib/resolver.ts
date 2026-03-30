@@ -66,6 +66,19 @@ interface CompatibilityMatrix {
   allPlatforms: PlatformOption[]
 }
 
+interface EnvironmentAnalysisResult {
+  supportedCombos: Set<string>
+  signatures: Map<string, string>
+}
+
+interface EnvironmentAnalysisContext {
+  client: PypiClient
+  inputs: ResolutionInputs
+  pythonPool: string[]
+  memo: Map<string, Promise<EnvironmentAnalysisResult>>
+  state: ResolverState
+}
+
 export async function resolveDependencyGraph(
   inputs: ResolutionInputs,
   client: PypiClient,
@@ -97,8 +110,6 @@ export async function resolveDependencyGraph(
     ...(rootProject.data.info.provides_extra ?? []),
     ...extractRootExtras(rootProject.data.info.requires_dist ?? []),
   ])
-  const rootOptions = deriveRootOptions(rootProject.data, rootSnapshot, inputs, rootExtras)
-  const effectiveInputs = sanitizeInputs(inputs, rootOptions)
   const state: ResolverState = {
     nodes: new Map<string, GraphNode>(),
     edges: new Map<string, GraphEdge>(),
@@ -109,6 +120,8 @@ export async function resolveDependencyGraph(
 
   recordFetchSource(state.limits, rootProject.source)
   state.projectSnapshots.set(normalizedRoot, rootSnapshot)
+  const rootOptions = await deriveRootOptions(rootProject.data, rootSnapshot, inputs, rootExtras, client, state)
+  const effectiveInputs = sanitizeInputs(inputs, rootOptions)
 
   const rootId = await resolveNode(
     {
@@ -324,12 +337,14 @@ function buildMarkerContext(inputs: ResolutionInputs, selectedExtras: string[]):
   }
 }
 
-function deriveRootOptions(
+async function deriveRootOptions(
   rootProject: PypiProjectResponse,
   rootSnapshot: ProjectSnapshot,
   inputs: ResolutionInputs,
   rootExtras: string[],
-): RootOptions {
+  client: PypiClient,
+  state: ResolverState,
+): Promise<RootOptions> {
   const sanitizedExtras = inputs.extras.filter((extra) => rootExtras.includes(extra))
   const parsedRequirements = parseRequirementList(rootProject.info.requires_dist ?? [])
   const availableVersions = sortVersionsDescending(
@@ -342,10 +357,20 @@ function deriveRootOptions(
   const selectedVersionFiles =
     rootProject.releases[selectedOrDefaultVersion] ?? rootProject.releases[rootProject.info.version] ?? []
   const pythonPool = buildPythonCandidatePool(inputs.pythonVersion, selectedVersionFiles)
-  const compatibility = buildCompatibilityMatrix(
-    selectedVersionFiles,
+  const compatibility = await buildResolvedCompatibilityMatrix(
+    {
+      name: rootProject.info.name,
+      normalizedName: normalizePackageName(rootProject.info.name),
+      specifiers: [],
+      requirementTexts: [],
+      selectedExtras: sanitizedExtras,
+      depth: 0,
+    },
     pythonPool,
-    rootProject.info.requires_python,
+    inputs,
+    client,
+    state,
+    rootProject,
   )
 
   let supportedPlatforms = deriveSupportedPlatforms(compatibility, inputs.pythonVersion)
@@ -358,34 +383,34 @@ function deriveRootOptions(
   supportedPythonVersions = deriveSupportedPythonVersions(compatibility, effectivePlatform, pythonPool)
   effectivePythonVersion = pickSupportedPythonVersion(effectivePythonVersion, supportedPythonVersions)
 
-  const pythonSensitive = hasRequirementVariation(
-    parsedRequirements,
-    supportedPythonVersions,
-    (pythonVersion) =>
-      buildMarkerContext(
-        {
-          ...inputs,
-          pythonVersion,
-          platform: effectivePlatform,
-          extras: sanitizedExtras,
-        },
-        sanitizedExtras,
-      ),
+  const signatures = collectEnvironmentSignatures(
+    compatibility,
+    {
+      name: rootProject.info.name,
+      normalizedName: normalizePackageName(rootProject.info.name),
+      specifiers: [],
+      requirementTexts: [],
+      selectedExtras: sanitizedExtras,
+      depth: 0,
+    },
+    pythonPool,
+    inputs,
+    client,
+      state,
+      rootProject,
   )
-  const platformSensitive = hasRequirementVariation(
-    parsedRequirements,
-    supportedPlatforms,
-    (platform) =>
-      buildMarkerContext(
-        {
-          ...inputs,
-          pythonVersion: effectivePythonVersion,
-          platform,
-          extras: sanitizedExtras,
-        },
-        sanitizedExtras,
-      ),
-  )
+  const [pythonSensitive, platformSensitive] = await Promise.all([
+    hasEnvironmentVariation(
+      signatures,
+      supportedPythonVersions,
+      (pythonVersion) => makeEnvironmentKey(pythonVersion, effectivePlatform),
+    ),
+    hasEnvironmentVariation(
+      signatures,
+      supportedPlatforms,
+      (platform) => makeEnvironmentKey(effectivePythonVersion, platform),
+    ),
+  ])
 
   return {
     extras: rootExtras,
@@ -394,9 +419,39 @@ function deriveRootOptions(
     supportedPlatforms,
     showVersionSelector: availableVersions.length > 1,
     showPythonSelector:
-      supportedPythonVersions.length < pythonPool.length || pythonSensitive,
+      supportedPythonVersions.length < pythonPool.length ||
+      pythonSensitive ||
+      hasRequirementVariation(
+        parsedRequirements,
+        supportedPythonVersions,
+        (pythonVersion) =>
+          buildMarkerContext(
+            {
+              ...inputs,
+              pythonVersion,
+              platform: effectivePlatform,
+              extras: sanitizedExtras,
+            },
+            sanitizedExtras,
+          ),
+      ),
     showPlatformSelector:
-      supportedPlatforms.length < COMMON_PLATFORM_OPTIONS.length || platformSensitive,
+      supportedPlatforms.length < COMMON_PLATFORM_OPTIONS.length ||
+      platformSensitive ||
+      hasRequirementVariation(
+        parsedRequirements,
+        supportedPlatforms,
+        (platform) =>
+          buildMarkerContext(
+            {
+              ...inputs,
+              pythonVersion: effectivePythonVersion,
+              platform,
+              extras: sanitizedExtras,
+            },
+            sanitizedExtras,
+          ),
+      ),
   }
 }
 
@@ -442,6 +497,336 @@ function deriveSupportedPlatforms(
   }
 
   return compatibility.allPlatforms
+}
+
+async function buildResolvedCompatibilityMatrix(
+  request: ResolveRequest,
+  pythonPool: string[],
+  inputs: ResolutionInputs,
+  client: PypiClient,
+  state: ResolverState,
+  preloadedProject?: PypiProjectResponse,
+): Promise<CompatibilityMatrix> {
+  const analysis = await analyzeEnvironmentSupport(
+    request,
+    {
+      client,
+      inputs,
+      pythonPool,
+      memo: new Map<string, Promise<EnvironmentAnalysisResult>>(),
+      state,
+    },
+    new Set<string>(),
+    preloadedProject,
+  )
+
+  return compatibilityMatrixFromCombos(analysis.supportedCombos)
+}
+
+async function collectEnvironmentSignatures(
+  compatibility: CompatibilityMatrix,
+  request: ResolveRequest,
+  pythonPool: string[],
+  inputs: ResolutionInputs,
+  client: PypiClient,
+  state: ResolverState,
+  preloadedProject?: PypiProjectResponse,
+): Promise<Map<string, string>> {
+  const analysis = await analyzeEnvironmentSupport(
+    request,
+    {
+      client,
+      inputs,
+      pythonPool,
+      memo: new Map<string, Promise<EnvironmentAnalysisResult>>(),
+      state,
+    },
+    new Set<string>(),
+    preloadedProject,
+  )
+
+  return new Map(
+    [...analysis.signatures.entries()].filter(([key]) => {
+      const [pythonVersion, platform] = parseEnvironmentKey(key)
+      return (
+        compatibility.pythonToPlatforms.get(pythonVersion)?.has(platform) ??
+        false
+      )
+    }),
+  )
+}
+
+async function analyzeEnvironmentSupport(
+  request: ResolveRequest,
+  context: EnvironmentAnalysisContext,
+  path: Set<string>,
+  preloadedProject?: PypiProjectResponse,
+): Promise<EnvironmentAnalysisResult> {
+  const memoKey = makeEnvironmentMemoKey(request, context.inputs)
+  const existing = context.memo.get(memoKey)
+  if (existing) {
+    return existing
+  }
+
+  if (path.has(memoKey)) {
+    return {
+      supportedCombos: buildAllEnvironmentCombos(context.pythonPool),
+      signatures: new Map(),
+    }
+  }
+
+  const nextPath = new Set(path)
+  nextPath.add(memoKey)
+
+  const promise = (async (): Promise<EnvironmentAnalysisResult> => {
+    let summary: PypiProjectResponse
+    try {
+      summary = await loadProject(request.normalizedName, context, preloadedProject)
+    } catch {
+      return {
+        supportedCombos: buildAllEnvironmentCombos(context.pythonPool),
+        signatures: new Map(),
+      }
+    }
+    const snapshot = projectSnapshotFromReleases(summary.releases)
+    const availableVersions = snapshot.releases.filter((version) => !snapshot.yankedVersions.has(version))
+    const manualOverride =
+      request.depth === 0
+        ? context.inputs.rootVersion
+        : context.inputs.manualVersions[request.normalizedName] ?? null
+    const versionChoice =
+      request.depth === 0
+        ? selectRootVersion(availableVersions, manualOverride)
+        : selectVersion(availableVersions, request.specifiers, manualOverride)
+
+    if (!versionChoice.selectedVersion) {
+      return {
+        supportedCombos: buildAllEnvironmentCombos(context.pythonPool),
+        signatures: new Map(),
+      }
+    }
+
+    let versionData: PypiProjectResponse | PypiVersionResponse
+    try {
+      versionData = await loadVersionData(
+        request.normalizedName,
+        versionChoice.selectedVersion,
+        summary,
+        context,
+      )
+    } catch {
+      return {
+        supportedCombos: buildAllEnvironmentCombos(context.pythonPool),
+        signatures: new Map(),
+      }
+    }
+    const files = getVersionFiles(versionData, summary, versionChoice.selectedVersion)
+    const selfCompatibility = buildCompatibilityMatrix(
+      files,
+      context.pythonPool,
+      versionData.info.requires_python ?? null,
+    )
+    const supportedCombos = compatibilityCombos(selfCompatibility)
+    const signatures = new Map<string, string>(
+      [...supportedCombos].map((comboKey) => [comboKey, makeNodeId(request.normalizedName, versionChoice.selectedVersion!, request.selectedExtras)]),
+    )
+    const requirements = versionData.info.requires_dist ?? []
+
+    for (const rawRequirement of requirements) {
+      let parsed: ParsedRequirement
+      try {
+        parsed = parseRequirement(rawRequirement)
+      } catch {
+        continue
+      }
+
+      const activeCombos = [...supportedCombos].filter((comboKey) => {
+        if (!parsed.markerAst || !parsed.markerText) {
+          return true
+        }
+
+        const [pythonVersion, platform] = parseEnvironmentKey(comboKey)
+        return evaluateMarker(
+          parsed.markerAst,
+          buildMarkerContext(
+            {
+              ...context.inputs,
+              pythonVersion,
+              platform,
+              extras: request.selectedExtras,
+            },
+            request.selectedExtras,
+          ),
+          parsed.markerText,
+        ).active
+      })
+
+      if (activeCombos.length === 0) {
+        continue
+      }
+
+      if (parsed.directReference) {
+        for (const comboKey of activeCombos) {
+          signatures.set(comboKey, `${signatures.get(comboKey)}|${parsed.raw}:direct`)
+        }
+        continue
+      }
+
+      const child = await analyzeEnvironmentSupport(
+        {
+          name: parsed.name,
+          normalizedName: parsed.normalizedName,
+          specifiers: parsed.specifier ? [parsed.specifier] : [],
+          requirementTexts: [parsed.raw],
+          selectedExtras: parsed.extras,
+          depth: request.depth + 1,
+        },
+        context,
+        nextPath,
+      )
+
+      for (const comboKey of activeCombos) {
+        if (!child.supportedCombos.has(comboKey)) {
+          supportedCombos.delete(comboKey)
+          signatures.delete(comboKey)
+          continue
+        }
+
+        const childSignature = child.signatures.get(comboKey)
+        if (childSignature) {
+          signatures.set(comboKey, `${signatures.get(comboKey)}|${parsed.raw}->${childSignature}`)
+        }
+      }
+    }
+
+    return { supportedCombos, signatures }
+  })()
+
+  context.memo.set(memoKey, promise)
+  return promise
+}
+
+async function hasEnvironmentVariation(
+  signaturesPromise: Promise<Map<string, string>>,
+  values: string[],
+  toKey: (value: string) => string,
+): Promise<boolean> {
+  if (values.length === 0) {
+    return false
+  }
+
+  const signatures = await signaturesPromise
+  const resolved = values.map((value) => signatures.get(toKey(value)) ?? '')
+  return new Set(resolved).size > 1
+}
+
+async function loadProject(
+  normalizedName: string,
+  context: EnvironmentAnalysisContext,
+  preloadedProject?: PypiProjectResponse,
+): Promise<PypiProjectResponse> {
+  if (preloadedProject) {
+    return preloadedProject
+  }
+
+  const result = await context.client.getProject(normalizedName)
+  recordFetchSource(context.state.limits, result.source)
+  return result.data
+}
+
+async function loadVersionData(
+  normalizedName: string,
+  selectedVersion: string,
+  summary: PypiProjectResponse,
+  context: EnvironmentAnalysisContext,
+): Promise<PypiProjectResponse | PypiVersionResponse> {
+  if (selectedVersion === summary.info.version) {
+    return summary
+  }
+
+  const result = await context.client.getVersion(normalizedName, selectedVersion)
+  recordFetchSource(context.state.limits, result.source)
+  return result.data
+}
+
+function getVersionFiles(
+  versionData: PypiProjectResponse | PypiVersionResponse,
+  summary: PypiProjectResponse,
+  selectedVersion: string,
+): PypiFile[] {
+  if ('urls' in versionData) {
+    return versionData.urls
+  }
+
+  return versionData.releases[selectedVersion] ?? summary.releases[selectedVersion] ?? []
+}
+
+function makeEnvironmentMemoKey(request: ResolveRequest, inputs: ResolutionInputs): string {
+  const manualOverride =
+    request.depth === 0
+      ? inputs.rootVersion ?? ''
+      : inputs.manualVersions[request.normalizedName] ?? ''
+
+  return [
+    request.normalizedName,
+    request.specifiers.join(','),
+    [...request.selectedExtras].sort((left, right) => left.localeCompare(right)).join(','),
+    manualOverride,
+    request.depth === 0 ? 'root' : 'dep',
+  ].join('|')
+}
+
+function makeEnvironmentKey(pythonVersion: string, platform: PlatformOption): string {
+  return `${pythonVersion}|${normalizePlatformTarget(platform)}`
+}
+
+function parseEnvironmentKey(value: string): [string, PlatformOption] {
+  const [pythonVersion, platform] = value.split('|', 2)
+  return [pythonVersion, normalizePlatformTarget(platform ?? '')]
+}
+
+function buildAllEnvironmentCombos(pythonPool: string[]): Set<string> {
+  return new Set(
+    pythonPool.flatMap((pythonVersion) =>
+      COMMON_PLATFORM_OPTIONS.map((platform) => makeEnvironmentKey(pythonVersion, platform)),
+    ),
+  )
+}
+
+function compatibilityCombos(compatibility: CompatibilityMatrix): Set<string> {
+  const combos = new Set<string>()
+
+  for (const [pythonVersion, platforms] of compatibility.pythonToPlatforms.entries()) {
+    for (const platform of platforms) {
+      combos.add(makeEnvironmentKey(pythonVersion, platform))
+    }
+  }
+
+  return combos
+}
+
+function compatibilityMatrixFromCombos(combos: Iterable<string>): CompatibilityMatrix {
+  const pythonToPlatforms = new Map<string, Set<PlatformOption>>()
+  const platformToPython = new Map<PlatformOption, Set<string>>()
+
+  for (const comboKey of combos) {
+    const [pythonVersion, platform] = parseEnvironmentKey(comboKey)
+    const normalizedPlatform = normalizePlatformTarget(platform)
+    const platforms = pythonToPlatforms.get(pythonVersion) ?? new Set<PlatformOption>()
+    pythonToPlatforms.set(pythonVersion, platforms)
+    platforms.add(normalizedPlatform)
+
+    const versions = platformToPython.get(normalizedPlatform) ?? new Set<string>()
+    platformToPython.set(normalizedPlatform, versions)
+    versions.add(pythonVersion)
+  }
+
+  return {
+    pythonToPlatforms,
+    platformToPython,
+    allPythonVersions: sortPythonVersions(pythonToPlatforms.keys()),
+    allPlatforms: sortPlatformOptions(platformToPython.keys()),
+  }
 }
 
 function supportsPythonSpecifier(specifier: string | null, version: string): boolean {
@@ -671,7 +1056,6 @@ function parseRequirementList(requiresDist: string[]): ParsedRequirement[] {
     try {
       parsed.push(parseRequirement(rawRequirement))
     } catch {
-      continue
     }
   }
 
@@ -879,7 +1263,6 @@ function extractRootExtras(requiresDist: string[]): string[] {
         }, parsed.markerText)
       }
     } catch {
-      continue
     }
   }
 
